@@ -2,6 +2,8 @@
 
 A single-file HTML tool (`rex_item_tool.html`) for validating and cleaning up RSG-Core `shared/items.lua` item tables. Open the file in a browser — no server or build step required.
 
+<img width="1898" height="871" alt="rex_item_tool" src="https://github.com/user-attachments/assets/7ec484e1-32b6-4864-ae88-ec3c57c6ded0" />
+
 ## Features
 
 - **Paste or upload** a `shared/items.lua` file (or any Lua table of item entries).
