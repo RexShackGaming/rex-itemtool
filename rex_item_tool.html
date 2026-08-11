@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RSG Shared Items Checker</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#2a2f3a;
+    --text:#e6e8ee; --muted:#8b93a3; --accent:#c9a96e;
+    --ok:#5fb87a; --warn:#e0b341; --err:#e06060;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  header{padding:20px 28px;border-bottom:1px solid var(--border);}
+  header h1{margin:0 0 4px;font-size:20px;}
+  header p{margin:0;color:var(--muted);font-size:13px;}
+  .layout{display:grid;grid-template-columns:1fr 1fr;gap:0;height:calc(100vh - 78px);}
+  .pane{overflow:auto;padding:18px 24px;}
+  .pane.left{border-right:1px solid var(--border);display:flex;flex-direction:column;gap:12px;}
+  textarea{
+    flex:1;min-height:300px;width:100%;background:var(--panel);color:var(--text);
+    border:1px solid var(--border);border-radius:8px;padding:14px;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;
+    resize:vertical;
+  }
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  button{
+    background:var(--accent);color:#1a1a1a;border:none;padding:9px 16px;border-radius:6px;
+    font-size:13px;font-weight:600;cursor:pointer;
+  }
+  button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border);}
+  input[type=file]{display:none;}
+  label.filebtn{
+    background:var(--panel2);color:var(--text);border:1px solid var(--border);
+    padding:9px 16px;border-radius:6px;font-size:13px;cursor:pointer;
+  }
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:4px;}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:90px;}
+  .stat .n{font-size:20px;font-weight:700;}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .stat.err .n{color:var(--err);} .stat.warn .n{color:var(--warn);} .stat.ok .n{color:var(--ok);}
+  .item{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;}
+  .item-head{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;}
+  .item-head:hover{background:var(--panel2);}
+  .item-name{font:13px ui-monospace,Menlo,Consolas,monospace;color:var(--accent);}
+  .badges{display:flex;gap:6px;}
+  .badge{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600;}
+  .badge.err{background:rgba(224,96,96,.15);color:var(--err);}
+  .badge.warn{background:rgba(224,179,65,.15);color:var(--warn);}
+  .badge.ok{background:rgba(95,184,122,.15);color:var(--ok);}
+  .item-body{padding:0 14px 12px;display:none;border-top:1px solid var(--border);}
+  .item-body.open{display:block;}
+  .issue{padding:8px 0;font-size:13px;border-bottom:1px dashed var(--border);}
+  .issue:last-child{border-bottom:none;}
+  .issue .tag{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;padding:1px 6px;border-radius:4px;margin-right:8px;}
+  .tag.error{background:var(--err);color:#1a1a1a;}
+  .tag.suggestion{background:var(--warn);color:#1a1a1a;}
+  .empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center;}
+  .hint{color:var(--muted);font-size:12px;margin-top:-4px;}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RSG Shared Items Checker</h1>
+  <p>Paste or upload your RSG-Core <code>shared/items.lua</code> to validate item format and surface improvements.</p>
+</header>
+
+<div class="layout">
+  <div class="pane left">
+    <div class="row">
+      <label class="filebtn">Upload items.lua<input type="file" id="fileInput" accept=".lua,.txt"></label>
+      <button id="checkBtn">Check Items</button>
+      <button class="secondary" id="exportBtn">Export Clean items.lua</button>
+      <button class="secondary" id="sampleBtn">Load Sample</button>
+      <button class="secondary" id="clearBtn">Clear</button>
+    </div>
+    <div class="hint">Expects a Lua table like <code>RSGCore.Shared.Items["itemname"] = { ... }</code> or a plain <code>Items = {}</code> table with one entry per item.</div>
+    <textarea id="input" placeholder='RSGCore.Shared.Items = {
+    ["bandage"] = {
+        name = "bandage",
+        label = "Bandage",
+        weight = 100,
+        type = "item",
+        image = "bandage.png",
+        unique = false,
+        useable = true,
+        shouldClose = true,
+        combinable = nil,
+        description = "Stops bleeding and heals minor wounds"
+    },
+}'></textarea>
+  </div>
+  <div class="pane right" id="results">
+    <div class="empty">Paste your items table on the left and click "Check Items".</div>
+  </div>
+</div>
+
+<script>
+const REQUIRED_FIELDS = ['name','label','weight','type','image','unique','useable','shouldClose','description'];
+const VALID_TYPES = ['item','weapon','ammo'];
+
+function extractItemBlocks(src) {
+  const blocks = [];
+  // matches ["itemname"] = { ... }  OR  itemname = { ... }  (bare key form)
+  const re = /(?:\[\s*["']?([\w]+)["']?\s*\]|(?:^|[\{\s,;])([A-Za-z_]\w*))\s*=\s*\{/gm;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const key = m[1] || m[2];
+    if (!key || key === 'Items') continue; // skip the outer table declaration itself
+    let start = re.lastIndex - 1;
+    let depth = 0, i = start;
+    for (; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') { depth--; if (depth === 0) break; }
+    }
+    if (depth === 0) {
+      const body = src.slice(start, i + 1);
+      blocks.push({ key, body, start, end: i + 1 });
+    }
+  }
+  return blocks;
+}
+
+// Checks that every item block (except the last) is followed by a comma
+// before the next one starts — i.e. `},` not `}` running straight into the
+// next entry, which is valid-looking to our per-item regex but breaks the
+// actual Lua table.
+function findMissingCommas(src, blocks) {
+  const missing = [];
+  for (let idx = 0; idx < blocks.length - 1; idx++) {
+    const between = src.slice(blocks[idx].end, blocks[idx + 1].start);
+    // strip whitespace and Lua line comments (-- ...) to find the first real token
+    const stripped = between.replace(/--[^\n]*/g, '').trim();
+    if (!stripped.startsWith(',')) {
+      missing.push({ afterKey: blocks[idx].key, beforeKey: blocks[idx + 1].key });
+    }
+  }
+  return missing;
+}
+
+function getField(body, field) {
+  const match = body.match(new RegExp('\\b' + field + '\\s*=\\s*(nil|true|false|"[^"]*"|\'[^\']*\'|[-0-9.]+)'));
+  return match ? match[1] : undefined;
+}
+
+// Splits a comma-separated Lua field list, respecting nested {}, (), and quoted strings.
+function splitTopLevel(s) {
+  const parts = [];
+  let depth = 0, cur = '', inStr = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      cur += c;
+      if (c === inStr && s[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (c === '"' || c === "'") { inStr = c; cur += c; continue; }
+    if (c === '{' || c === '(') depth++;
+    if (c === '}' || c === ')') depth--;
+    if (c === ',' && depth === 0) { parts.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts;
+}
+
+// Detects a missing comma *between two fields* inside an item body, e.g.
+// `label = 'Water'  weight = 100` — splitTopLevel can't see this as two
+// fields since there's no comma to split on, so it has to be caught here by
+// looking for a second `field =` sitting right after a value with no comma.
+function findMissingFieldCommas(body) {
+  const inner = body.slice(body.indexOf('{') + 1, body.lastIndexOf('}'));
+  const parts = splitTopLevel(inner);
+  const issues = [];
+  const valueRe = /^("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|-?\d+(?:\.\d+)?|true|false|nil|\{[\s\S]*\})/;
+  parts.forEach(p => {
+    const fieldMatch = p.match(/^\s*([A-Za-z_]\w*)\s*=\s*/);
+    if (!fieldMatch) return;
+    let rest = p.slice(fieldMatch[0].length);
+    const valueMatch = rest.match(valueRe);
+    if (!valueMatch) return;
+    const leftover = rest.slice(valueMatch[0].length);
+    const nextFieldMatch = leftover.match(/^\s*([A-Za-z_]\w*)\s*=/);
+    if (nextFieldMatch) {
+      issues.push({ field: fieldMatch[1], nextField: nextFieldMatch[1] });
+    }
+  });
+  return issues;
+}
+
+// Parses every field=value pair out of an item's { ... } body, preserving raw value text.
+function parseFields(body) {
+  const inner = body.slice(body.indexOf('{') + 1, body.lastIndexOf('}'));
+  const parts = splitTopLevel(inner);
+  const fields = {};
+  parts.forEach(p => {
+    const m = p.match(/^\s*([A-Za-z_]\w*)\s*=\s*([\s\S]*)$/);
+    if (m) fields[m[1]] = m[2].trim();
+  });
+  return fields;
+}
+
+const FIELD_ORDER = ['name','label','weight','type','image','unique','useable','shouldClose','description'];
+
+// Converts a double-quoted Lua string value to single-quoted; leaves
+// non-string values (numbers, booleans, nil) untouched.
+function toSingleQuoted(value) {
+  const m = value.match(/^"([\s\S]*)"$/);
+  if (!m) return value;
+  return `'${m[1].replace(/\\"/g, '"').replace(/'/g, "\\'")}'`;
+}
+
+// An item counts as a perishable if it has a `decay` field set to anything
+// other than nil/false.
+function hasDecay(fields) {
+  if (fields.decay === undefined) return false;
+  const v = fields.decay.trim();
+  return v !== 'nil' && v !== 'false';
+}
+
+// Renders one group of entries as aligned Lua table lines (own column
+// widths, so unrelated groups don't force each other's columns wider).
+function renderGroup(entries) {
+  if (entries.length === 0) return [];
+
+  const extraFields = [];
+  entries.forEach(({ fields }) => {
+    Object.keys(fields).forEach(f => {
+      if (!FIELD_ORDER.includes(f) && f !== 'combinable' && !extraFields.includes(f)) {
+        extraFields.push(f);
+      }
+    });
+  });
+  const columns = [...FIELD_ORDER, ...extraFields];
+
+  const widths = {};
+  columns.forEach(f => {
+    let max = 0;
+    entries.forEach(({ fields }) => {
+      if (fields[f] !== undefined) {
+        max = Math.max(max, `${f} = ${fields[f]},`.length);
+      }
+    });
+    widths[f] = max;
+  });
+
+  const keyWidth = Math.max(...entries.map(({ key }) => key.length));
+
+  return entries.map(({ key, fields }) => {
+    const parts = columns
+      .filter(f => fields[f] !== undefined)
+      .map((f, i, arr) => {
+        const chunk = `${f} = ${fields[f]},`;
+        const isLast = i === arr.length - 1;
+        return isLast ? chunk.slice(0, -1) : chunk.padEnd(widths[f] + 1);
+      });
+    const keyStr = key.padEnd(keyWidth);
+    return `    ${keyStr} = { ${parts.join(' ')} },`;
+  });
+}
+
+function buildCleanLua(blocks) {
+  const entries = blocks.map(({ key, body }) => {
+    const fields = parseFields(body);
+    Object.keys(fields).forEach(f => { fields[f] = toSingleQuoted(fields[f]); });
+    return { key, fields };
+  });
+
+  // Drop duplicate keys, keeping the first occurrence.
+  const seen = new Set();
+  const deduped = entries.filter(({ key }) => {
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const byKey = (a, b) => a.key.localeCompare(b.key);
+
+  const weapons = deduped.filter(e => e.key.startsWith('weapon_')).sort(byKey);
+  const ammo = deduped.filter(e => !weapons.includes(e) && e.key.startsWith('ammo_')).sort(byKey);
+  const perishables = deduped.filter(e => !weapons.includes(e) && !ammo.includes(e) && hasDecay(e.fields)).sort(byKey);
+  const standard = deduped.filter(e => !weapons.includes(e) && !ammo.includes(e) && !perishables.includes(e)).sort(byKey);
+
+  const sections = [];
+  const standardLines = renderGroup(standard);
+  if (standardLines.length) sections.push(standardLines.join('\n'));
+
+  const weaponLines = renderGroup(weapons);
+  if (weaponLines.length) sections.push(`    -- weapons\n${weaponLines.join('\n')}`);
+
+  const ammoLines = renderGroup(ammo);
+  if (ammoLines.length) sections.push(`    -- ammo\n${ammoLines.join('\n')}`);
+
+  const perishableLines = renderGroup(perishables);
+  if (perishableLines.length) sections.push(`    -- perishables\n${perishableLines.join('\n')}`);
+
+  return `RSGShared = RSGShared or {}\nRSGShared.Items = {\n${sections.join('\n\n')}\n}\n`;
+}
+
+function analyzeItem(key, body) {
+  const issues = [];
+
+  findMissingFieldCommas(body).forEach(({ field, nextField }) => {
+    issues.push({level:'error', text:`Missing comma after \`${field}\` — before \`${nextField}\` this will break the Lua table.`});
+  });
+
+  const present = {};
+  REQUIRED_FIELDS.forEach(f => {
+    const val = getField(body, f);
+    present[f] = val;
+    if (val === undefined) {
+      issues.push({level:'error', text:`Missing field \`${f}\`.`});
+    }
+  });
+
+  if (present.name !== undefined) {
+    const nameVal = present.name.replace(/["']/g,'');
+    if (nameVal !== key) {
+      issues.push({level:'error', text:`\`name\` ("${nameVal}") does not match the item key ("${key}").`});
+    }
+  }
+
+  if (present.label !== undefined) {
+    const labelVal = present.label.replace(/["']/g,'');
+    if (!labelVal.trim()) {
+      issues.push({level:'error', text:'`label` is empty.'});
+    } else if (labelVal === labelVal.toLowerCase()) {
+      issues.push({level:'suggestion', text:'`label` looks lowercase — consider Title Case for display, e.g. "' + labelVal.replace(/\b\w/g, c => c.toUpperCase()) + '".'});
+    }
+  }
+
+  if (present.weight !== undefined) {
+    const w = Number(present.weight);
+    if (isNaN(w)) {
+      issues.push({level:'error', text:'`weight` is not a number.'});
+    } else if (w < 0) {
+      issues.push({level:'error', text:'`weight` cannot be negative.'});
+    } else if (w === 0) {
+      issues.push({level:'suggestion', text:'`weight` is 0 — confirm this is intentional (item takes no inventory space).'});
+    } else if (w > 50000) {
+      issues.push({level:'suggestion', text:'`weight` looks unusually high (' + w + ') — RSG weights are typically in grams (e.g. 100–5000).'});
+    }
+  }
+
+  if (present.type !== undefined) {
+    const t = present.type.replace(/["']/g,'');
+    if (!VALID_TYPES.includes(t)) {
+      issues.push({level:'error', text:`\`type\` "${t}" is not one of: ${VALID_TYPES.join(', ')}.`});
+    }
+  }
+
+  if (present.image !== undefined) {
+    const img = present.image.replace(/["']/g,'');
+    if (!/\.(png|jpg|jpeg)$/i.test(img)) {
+      issues.push({level:'error', text:'`image` should end in .png/.jpg — got "' + img + '".'});
+    } else if (img.replace(/\.(png|jpg|jpeg)$/i,'') !== key) {
+      issues.push({level:'suggestion', text:`\`image\` filename ("${img}") doesn't match the item key ("${key}") — keeping them aligned makes asset lookups easier.`});
+    }
+  }
+
+  ['unique','useable','shouldClose'].forEach(f => {
+    if (present[f] !== undefined && !['true','false'].includes(present[f])) {
+      issues.push({level:'error', text:`\`${f}\` should be true or false, got \`${present[f]}\`.`});
+    }
+  });
+
+  if (present.description !== undefined) {
+    const d = present.description.replace(/["']/g,'');
+    if (!d.trim()) {
+      issues.push({level:'suggestion', text:'`description` is empty — add flavor/usage text shown in the inventory tooltip.'});
+    } else if (d.length < 8) {
+      issues.push({level:'suggestion', text:'`description` is very short — consider a more descriptive tooltip.'});
+    }
+  }
+
+  if (/\bcombinable\s*=/.test(body)) {
+    issues.push({level:'suggestion', text:'`combinable` is deprecated in current RSG-Core and no longer used — safe to remove.'});
+  }
+
+  return issues;
+}
+
+function render(blocks, missingCommas = []) {
+  const results = document.getElementById('results');
+  if (blocks.length === 0) {
+    results.innerHTML = '<div class="empty">No item entries found. Make sure your table uses <code>["itemname"] = { ... }</code> entries.</div>';
+    return;
+  }
+
+  const missingCommaHtml = missingCommas.length ? `
+    <div class="item" style="border-color:var(--err);">
+      <div class="item-head"><span class="item-name" style="color:var(--err);">Missing comma${missingCommas.length > 1 ? 's' : ''}</span></div>
+      <div class="item-body open">
+        ${missingCommas.map(mc => `<div class="issue"><span class="tag error">error</span>No comma after <code>${mc.afterKey}</code>, before <code>${mc.beforeKey}</code> — this will break the Lua table.</div>`).join('')}
+      </div>
+    </div>` : '';
+
+  let totalErr = 0, totalWarn = 0, totalOk = 0;
+  const itemsHtml = blocks.map(({key, body}) => {
+    const issues = analyzeItem(key, body);
+    const errCount = issues.filter(i => i.level === 'error').length;
+    const warnCount = issues.filter(i => i.level === 'suggestion').length;
+    if (errCount) totalErr++; else if (warnCount) totalWarn++; else totalOk++;
+
+    const badges = [];
+    if (errCount) badges.push(`<span class="badge err">${errCount} error${errCount>1?'s':''}</span>`);
+    if (warnCount) badges.push(`<span class="badge warn">${warnCount} suggestion${warnCount>1?'s':''}</span>`);
+    if (!errCount && !warnCount) badges.push(`<span class="badge ok">clean</span>`);
+
+    const issuesHtml = issues.length
+      ? issues.map(i => `<div class="issue"><span class="tag ${i.level === 'error' ? 'error' : 'suggestion'}">${i.level === 'error' ? 'error' : 'tip'}</span>${i.text}</div>`).join('')
+      : '<div class="issue">No issues found.</div>';
+
+    return `
+      <div class="item">
+        <div class="item-head" onclick="this.nextElementSibling.classList.toggle('open')">
+          <span class="item-name">${key}</span>
+          <span class="badges">${badges.join('')}</span>
+        </div>
+        <div class="item-body">${issuesHtml}</div>
+      </div>`;
+  }).join('');
+
+  results.innerHTML = `
+    <div class="summary">
+      <div class="stat ok"><div class="n">${totalOk}</div><div class="l">Clean</div></div>
+      <div class="stat warn"><div class="n">${totalWarn}</div><div class="l">Suggestions</div></div>
+      <div class="stat err"><div class="n">${totalErr + missingCommas.length}</div><div class="l">Errors</div></div>
+      <div class="stat"><div class="n">${blocks.length}</div><div class="l">Total items</div></div>
+    </div>
+    ${missingCommaHtml}
+    ${itemsHtml}
+  `;
+}
+
+document.getElementById('checkBtn').addEventListener('click', () => {
+  const src = document.getElementById('input').value;
+  const blocks = extractItemBlocks(src);
+  const missingCommas = findMissingCommas(src, blocks);
+  render(blocks, missingCommas);
+});
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const src = document.getElementById('input').value;
+  const blocks = extractItemBlocks(src);
+  if (blocks.length === 0) {
+    alert('No item entries found to export. Check your table format and try again.');
+    return;
+  }
+  const missingCommas = findMissingCommas(src, blocks);
+  if (missingCommas.length) {
+    const list = missingCommas.map(mc => `  - after "${mc.afterKey}", before "${mc.beforeKey}"`).join('\n');
+    const proceed = confirm(`Missing comma(s) detected — this input has a broken table:\n${list}\n\nExport anyway?`);
+    if (!proceed) return;
+  }
+  const clean = buildCleanLua(blocks);
+  const blob = new Blob([clean], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'items.lua';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  document.getElementById('input').value = '';
+  document.getElementById('results').innerHTML = '<div class="empty">Paste your items table on the left and click "Check Items".</div>';
+});
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { document.getElementById('input').value = reader.result; };
+  reader.readAsText(file);
+});
+
+document.getElementById('sampleBtn').addEventListener('click', () => {
+  document.getElementById('input').value = `RSGCore.Shared.Items = {
+    ["bandage"] = {
+        name = "bandage",
+        label = "bandage",
+        weight = 100,
+        type = "item",
+        image = "bandage.png",
+        unique = false,
+        useable = true,
+        shouldClose = true,
+        combinable = nil,
+        description = "Heals"
+    },
+    ["repeater_ammo"] = {
+        name = "repeaterammo",
+        label = "Repeater Ammo",
+        weight = 50,
+        type = "ammoo",
+        image = "ammo.jpg",
+        unique = "false",
+        useable = true,
+        shouldClose = true,
+        combinable = nil,
+        description = "Ammunition for the repeater rifle"
+    },
+    ["gold_bar"] = {
+        name = "gold_bar",
+        label = "Gold Bar",
+        weight = 5000,
+        type = "item",
+        image = "goldbar.png",
+        unique = true,
+        useable = false,
+        shouldClose = false,
+        combinable = nil,
+        description = "A heavy bar of pure gold, valuable to the right buyer"
+    },
+}`;
+});
+</script>
+</body>
+</html>
