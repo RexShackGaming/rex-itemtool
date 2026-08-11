@@ -1,58 +1,108 @@
 # RSG Item Tool
 
-- ✨ Store  :  https://store.rexshack.dev/
+- ✨ Store   : https://store.rexshack.dev/
 - ✨ Tip Jar : https://buymeacoffee.com/rexshack
 - ✨ Discord : https://discord.gg/Dmeh4dTQBT
 
-A single-file HTML tool (`rex_item_tool.html`) for validating and cleaning up RSG-Core `shared/items.lua` item tables. Open the file in a browser — no server or build step required.
+A single-file HTML tool for validating and cleaning up RSG-Core `shared/items.lua` item tables. Open `rex_item_tool.html` in any browser — no server or build step required.
 
 <img width="1898" height="871" alt="rex_item_tool" src="https://github.com/user-attachments/assets/7ec484e1-32b6-4864-ae88-ec3c57c6ded0" />
 
-## Features
+---
 
-- **Paste or upload** a `shared/items.lua` file (or any Lua table of item entries).
-- **Check Items** — validates every item and reports errors and suggestions:
-  - Missing required fields: `name`, `label`, `weight`, `type`, `image`, `unique`, `useable`, `shouldClose`, `description`.
-  - `name` not matching the item's table key.
-  - Empty or lowercase `label` (suggests Title Case).
-  - Invalid, negative, zero, or unusually high `weight`.
-  - `type` not one of `item`, `weapon`, `ammo`.
-  - `image` not ending in `.png`/`.jpg`, or not matching the item key.
-  - `unique` / `useable` / `shouldClose` not `true`/`false`.
-  - Short or empty `description`.
-  - Deprecated `combinable` field present.
-  - **Missing commas** between item entries, and missing commas *between fields within an item* (e.g. `label = 'Water'  weight = 100`) — both silently break the Lua table and are flagged as errors.
-- **Export Clean items.lua** — generates a reformatted, deduplicated version of the table:
-  - One item per line, fields aligned into columns for readability.
-  - Double-quoted string values converted to single quotes.
-  - Bare (unbracketed, unquoted) item keys, e.g. `bread = { ... }`.
-  - Duplicate item keys removed (first occurrence kept).
-  - Items grouped into comment blocks, in this order:
-    1. Standard items
-    2. `-- weapons` (keys starting with `weapon_`)
-    3. `-- ammo` (keys starting with `ammo_`)
-    4. `-- perishables` (items with a `decay` field set to something other than `nil`/`false`)
-  - Each group sorted alphabetically by key.
-  - Output is wrapped as:
-    ```lua
-    RSGShared = RSGShared or {}
-    RSGShared.Items = {
-        ...
-    }
-    ```
-  - If missing commas are detected, export prompts for confirmation before proceeding (since the resulting file may still be malformed).
-- **Load Sample** — fills the input with a small example table to try the tool out.
-- **Clear** — resets the input and results.
+## What it does
+
+Paste (or upload) your items table, hit **Check Items**, and the tool breaks down every item on the right side: clean items, suggestions, and errors. From there you can **Fix** issues one item at a time, **Fix All** in one click, or **Export** a clean, reformatted copy of the whole file.
+
+| Button | What happens |
+| --- | --- |
+| **Upload items.lua** | Loads a `.lua`/`.txt` file into the editor. |
+| **Check Items** | Validates every item and lists errors / suggestions per item, with summary stats up top. |
+| **Fix** *(per item)* | Repairs that one item's block in the editor, then re-checks it automatically so it re-renders clean. |
+| **Fix All Items** | Applies the same fixes to every item at once. |
+| **Export Clean items.lua** | Downloads a reformatted, deduplicated, grouped version of the table. |
+| **Load Sample** | Fills the editor with an example table so you can try the tool. |
+| **Clear** | Wipes the editor and the results panel. |
+
+---
+
+## What Fix does to an item
+
+- **`name`** → set to match the item key.
+- **`label`** → Title Case if empty or lowercase (e.g. `bandage` → `Bandage`).
+- **`weight`** → `100` if missing, not a number, or negative.
+- **`type`** → `'item'` if missing. Custom types (e.g. `stew`) are **kept** and not flagged.
+- **`image`** → `key.png` if missing, invalid, or not matching the item key.
+- **`unique` / `useable` / `shouldClose`** → `false` / `true` / `true` unless a valid boolean is present.
+- **`description`** → filled with label-based text (e.g. `'Bandage — useful item to have around.'`) when empty or very short.
+- **`combinable`** → removed (deprecated in current RSG-Core).
+- Extra fields (e.g. `decay`, `blends`) are preserved.
+- Missing commas — both between fields (`label = 'Water'  weight = 100`) and between items — are inserted.
+- Invalid Lua escape sequences inside quoted strings (e.g. `\S`) are repaired.
+
+---
+
+## What Check looks for
+
+**Errors** (breaks the table or won't work):
+- Missing required fields: `name`, `label`, `weight`, `type`, `image`, `unique`, `useable`, `shouldClose`, `description`
+- `name` not matching the item's table key
+- `weight` not a number, or negative
+- `image` not ending in `.png`/`.jpg`
+- `unique` / `useable` / `shouldClose` not `true` or `false`
+- Missing commas between items or between fields within an item
+- Invalid Lua escape sequences inside quoted strings (e.g. `\S`)
+
+**Suggestions** (safe to ignore, auto-fixed where possible):
+- Lowercase or empty `label`
+- Unusually high `weight`
+- `image` filename not matching the item key
+- Short or empty `description`
+- Deprecated `combinable` field
+
+Custom `type` values (e.g. `stew`, `painkillers`) and zero-weight items are **not** flagged — these are common and often intentional on RSG servers.
+
+---
+
+## What Export produces
+
+- One item per line with fields aligned into columns
+- Double-quoted strings converted to single quotes; apostrophes and backslashes are re-escaped correctly, so strings like `"The World's"` export as `'The World\'s'` — always valid Lua
+- Invalid escape sequences (e.g. `\S`) repaired during conversion
+- Bare, unbracketed item keys (e.g. `bread = { ... }`)
+- Duplicate keys removed (first occurrence kept)
+- Items sorted alphabetically and grouped under `-- weapons`, `-- ammo`, and `-- perishables` (items with a `decay` value)
+- Output wrapped as:
+
+```lua
+RSGShared = RSGShared or {}
+RSGShared.Items = {
+    ...
+}
+```
+
+If missing commas are detected, Export asks for confirmation first — the resulting file may still be malformed.
+
+---
 
 ## Usage
 
 1. Open `rex_item_tool.html` in a browser.
 2. Paste your `items.lua` content into the left panel, or use **Upload items.lua**.
-3. Click **Check Items** to see a per-item breakdown of errors and suggestions on the right.
-4. Fix any issues in the input (or in your source file and re-upload).
-5. Click **Export Clean items.lua** to download a reformatted, grouped, deduplicated version.
+3. Click **Check Items** to see the per-item breakdown on the right.
+4. Click **Fix** on any item (or **Fix All Items**) to repair issues directly in the editor.
+5. Click **Export Clean items.lua** to download the cleaned version.
+
+---
 
 ## Notes
 
-- Expects item entries in the form `["itemname"] = { ... }` or a bare key form `itemname = { ... }`.
-- Designed for RSG-Core's item table format; adjust `VALID_TYPES` and `FIELD_ORDER` in the script if your fork uses different conventions.
+- Expects entries in the form `["itemname"] = { ... }`, `itemname = { ... }`, or `RSGCore.Shared.Items["itemname"] = { ... }`.
+- Designed for RSG-Core's item table format; adjust `REQUIRED_FIELDS` and `FIELD_ORDER` in the script if your fork uses different conventions.
+
+---
+
+## Recent fixes
+
+- **Nested field tables no longer misread as items** — extra fields written as their own table (e.g. `blends = { ... }`) were previously picked up as bogus top-level item entries, throwing off Check counts, missing-comma detection, and Export. The scanner now skips past each item's full body before looking for the next one.
+- **Safer rendering of untrusted item data** — item values (name, image, label, etc.) are now HTML-escaped before being shown in the results panel, so pasting or uploading a crafted/untrusted `items.lua` can't inject markup into the page.

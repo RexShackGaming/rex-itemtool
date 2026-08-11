@@ -47,6 +47,8 @@
   .badge.err{background:rgba(224,96,96,.15);color:var(--err);}
   .badge.warn{background:rgba(224,179,65,.15);color:var(--warn);}
   .badge.ok{background:rgba(95,184,122,.15);color:var(--ok);}
+  .fix-btn{background:var(--ok);color:#1a1a1a;border:none;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;}
+  .fix-btn:hover{filter:brightness(1.1);}
   .item-body{padding:0 14px 12px;display:none;border-top:1px solid var(--border);}
   .item-body.open{display:block;}
   .issue{padding:8px 0;font-size:13px;border-bottom:1px dashed var(--border);}
@@ -98,7 +100,6 @@
 
 <script>
 const REQUIRED_FIELDS = ['name','label','weight','type','image','unique','useable','shouldClose','description'];
-const VALID_TYPES = ['item','weapon','ammo'];
 
 function extractItemBlocks(src) {
   const blocks = [];
@@ -117,9 +118,25 @@ function extractItemBlocks(src) {
     if (depth === 0) {
       const body = src.slice(start, i + 1);
       blocks.push({ key, body, start, end: i + 1 });
+      // Jump the scan past this whole block so nested fields that happen to
+      // look like `key = { ... }` (e.g. an extra `blends = { ... }` field
+      // inside an item) aren't picked up as bogus top-level item entries.
+      re.lastIndex = i + 1;
     }
   }
   return blocks;
+}
+
+// Minimal HTML-escaping for anything derived from user-supplied file
+// content before it's dropped into innerHTML (item keys/values can contain
+// arbitrary characters even though they can't form new item blocks).
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Checks that every item block (except the last) is followed by a comma
@@ -203,12 +220,50 @@ function parseFields(body) {
 
 const FIELD_ORDER = ['name','label','weight','type','image','unique','useable','shouldClose','description'];
 
-// Converts a double-quoted Lua string value to single-quoted; leaves
-// non-string values (numbers, booleans, nil) untouched.
+// Decodes the escape sequences in a Lua string body back into real characters
+// (so quote-style conversion can't corrupt backslashes or apostrophes).
+function decodeLuaString(s) {
+  const simple = { n:'\n', t:'\t', r:'\r', a:'\x07', b:'\b', f:'\f', v:'\x0b', '\\':'\\', '"':'"', "'":"'" };
+  return s.replace(/\\(x[0-9a-fA-F]{1,2}|\d{1,3}|.)/g, (m, esc) => {
+    if (simple[esc] !== undefined) return simple[esc];
+    if (esc[0] === 'x') return String.fromCharCode(parseInt(esc.slice(1), 16));
+    if (/^\d+$/.test(esc)) return String.fromCharCode(parseInt(esc, 10));
+    return esc;
+  });
+}
+
+// Wraps a plain string in single quotes, escaping backslashes and apostrophes
+// so the result is always valid Lua.
+function luaQ(s) {
+  return `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
+// Strips the surrounding quotes from a raw Lua string value without touching
+// quote characters inside the string (e.g. apostrophes).
+function unquote(s) {
+  if (s && s.length >= 2) {
+    if ((s[0] === '"' && s[s.length - 1] === '"') || (s[0] === "'" && s[s.length - 1] === "'")) {
+      return s.slice(1, -1);
+    }
+  }
+  return s;
+}
+
+// Title Cases a label, capitalizing only word-start letters (so apostrophes
+// like "World's" are preserved instead of producing "World'S").
+function titleCase(s) {
+  return s.replace(/(^|\s)\w/g, c => c.toUpperCase());
+}
+
+// Normalizes any quoted Lua string value into a safe single-quoted form,
+// repairing invalid escapes along the way. Leaves non-string values
+// (numbers, booleans, nil) untouched.
 function toSingleQuoted(value) {
-  const m = value.match(/^"([\s\S]*)"$/);
-  if (!m) return value;
-  return `'${m[1].replace(/\\"/g, '"').replace(/'/g, "\\'")}'`;
+  const dq = value.match(/^"([\s\S]*)"$/);
+  const sq = value.match(/^'([\s\S]*)'$/);
+  if (dq) return luaQ(decodeLuaString(dq[1]));
+  if (sq) return luaQ(decodeLuaString(sq[1]));
+  return value;
 }
 
 // An item counts as a perishable if it has a `decay` field set to anything
@@ -298,11 +353,39 @@ function buildCleanLua(blocks) {
   return `RSGShared = RSGShared or {}\nRSGShared.Items = {\n${sections.join('\n\n')}\n}\n`;
 }
 
+// Scans an item body for invalid Lua escape sequences inside quoted strings
+// (e.g. `\S`), which Lua refuses to load.
+function findInvalidEscapes(body) {
+  const invalid = [];
+  const valid = 'abfnrtv\\\'"';
+  let inStr = null;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (inStr) {
+      if (c === '\\') {
+        const n = i + 1 < body.length ? body[i + 1] : '';
+        const okEsc = valid.includes(n) || n === 'x' || n === 'u' || n === 'z' || n === '\n' || /[0-9]/.test(n);
+        if (!okEsc) invalid.push('\\' + n);
+        if (/[0-9]/.test(n) || n === 'x' || n === 'u') i += 2; else i += 1;
+        continue;
+      }
+      if (c === inStr) inStr = null;
+      continue;
+    }
+    if (c === '"' || c === "'") inStr = c;
+  }
+  return invalid;
+}
+
 function analyzeItem(key, body) {
   const issues = [];
 
+  findInvalidEscapes(body).forEach(esc => {
+    issues.push({level:'error', text:`Invalid Lua escape sequence \`${escapeHtml(esc)}\` inside a quoted string — this will fail to load. Fix will repair it.`});
+  });
+
   findMissingFieldCommas(body).forEach(({ field, nextField }) => {
-    issues.push({level:'error', text:`Missing comma after \`${field}\` — before \`${nextField}\` this will break the Lua table.`});
+    issues.push({level:'error', text:`Missing comma after \`${escapeHtml(field)}\` — before \`${escapeHtml(nextField)}\` this will break the Lua table.`});
   });
 
   const present = {};
@@ -317,16 +400,16 @@ function analyzeItem(key, body) {
   if (present.name !== undefined) {
     const nameVal = present.name.replace(/["']/g,'');
     if (nameVal !== key) {
-      issues.push({level:'error', text:`\`name\` ("${nameVal}") does not match the item key ("${key}").`});
+      issues.push({level:'error', text:`\`name\` ("${escapeHtml(nameVal)}") does not match the item key ("${escapeHtml(key)}").`});
     }
   }
 
   if (present.label !== undefined) {
-    const labelVal = present.label.replace(/["']/g,'');
+    const labelVal = unquote(present.label.trim());
     if (!labelVal.trim()) {
       issues.push({level:'error', text:'`label` is empty.'});
     } else if (labelVal === labelVal.toLowerCase()) {
-      issues.push({level:'suggestion', text:'`label` looks lowercase — consider Title Case for display, e.g. "' + labelVal.replace(/\b\w/g, c => c.toUpperCase()) + '".'});
+      issues.push({level:'suggestion', text:'`label` looks lowercase — consider Title Case for display, e.g. "' + escapeHtml(titleCase(labelVal)) + '".'});
     }
   }
 
@@ -336,32 +419,23 @@ function analyzeItem(key, body) {
       issues.push({level:'error', text:'`weight` is not a number.'});
     } else if (w < 0) {
       issues.push({level:'error', text:'`weight` cannot be negative.'});
-    } else if (w === 0) {
-      issues.push({level:'suggestion', text:'`weight` is 0 — confirm this is intentional (item takes no inventory space).'});
     } else if (w > 50000) {
       issues.push({level:'suggestion', text:'`weight` looks unusually high (' + w + ') — RSG weights are typically in grams (e.g. 100–5000).'});
-    }
-  }
-
-  if (present.type !== undefined) {
-    const t = present.type.replace(/["']/g,'');
-    if (!VALID_TYPES.includes(t)) {
-      issues.push({level:'error', text:`\`type\` "${t}" is not one of: ${VALID_TYPES.join(', ')}.`});
     }
   }
 
   if (present.image !== undefined) {
     const img = present.image.replace(/["']/g,'');
     if (!/\.(png|jpg|jpeg)$/i.test(img)) {
-      issues.push({level:'error', text:'`image` should end in .png/.jpg — got "' + img + '".'});
+      issues.push({level:'error', text:'`image` should end in .png/.jpg — got "' + escapeHtml(img) + '".'});
     } else if (img.replace(/\.(png|jpg|jpeg)$/i,'') !== key) {
-      issues.push({level:'suggestion', text:`\`image\` filename ("${img}") doesn't match the item key ("${key}") — keeping them aligned makes asset lookups easier.`});
+      issues.push({level:'suggestion', text:`\`image\` filename ("${escapeHtml(img)}") doesn't match the item key ("${escapeHtml(key)}") — keeping them aligned makes asset lookups easier.`});
     }
   }
 
   ['unique','useable','shouldClose'].forEach(f => {
     if (present[f] !== undefined && !['true','false'].includes(present[f])) {
-      issues.push({level:'error', text:`\`${f}\` should be true or false, got \`${present[f]}\`.`});
+      issues.push({level:'error', text:`\`${f}\` should be true or false, got \`${escapeHtml(present[f])}\`.`});
     }
   });
 
@@ -381,6 +455,97 @@ function analyzeItem(key, body) {
   return issues;
 }
 
+// Inserts missing commas *between fields* inside an item body, e.g.
+// `label = 'Water'  weight = 100` becomes `label = 'Water',  weight = 100`
+// so the fields parse correctly afterwards.
+function fixMissingFieldCommas(body) {
+  const open = body.indexOf('{');
+  const close = body.lastIndexOf('}');
+  if (open === -1 || close === -1) return body;
+  const inner = body.slice(open + 1, close);
+  const parts = splitTopLevel(inner);
+  let out = '';
+  let cursor = 0;
+  parts.forEach(p => {
+    const pos = inner.indexOf(p, cursor);
+    if (pos === -1) { out += p; cursor += p.length; return; }
+    let insertAt = -1;
+    const fieldMatch = p.match(/^\s*([A-Za-z_]\w*)\s*=\s*/);
+    if (fieldMatch) {
+      const rest = p.slice(fieldMatch[0].length);
+      const valueMatch = rest.match(/^("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|-?\d+(?:\.\d+)?|true|false|nil|\{[\s\S]*\})/);
+      if (valueMatch && rest.slice(valueMatch[0].length).match(/^\s*([A-Za-z_]\w*)\s*=/)) {
+        insertAt = pos + fieldMatch[0].length + valueMatch[0].length;
+      }
+    }
+    out += inner.slice(cursor, insertAt === -1 ? pos + p.length : insertAt)
+        + (insertAt !== -1 ? ',' : '')
+        + (insertAt !== -1 ? inner.slice(insertAt, pos + p.length) : '');
+    cursor = pos + p.length;
+  });
+  out += inner.slice(cursor);
+  return body.slice(0, open + 1) + out + body.slice(close);
+}
+
+// Builds a corrected field set for an item, auto-fixing every flagged issue
+// with sensible defaults. Extra (non-required) fields are preserved; the
+// deprecated `combinable` field is dropped.
+function getFixedFields(key, body) {
+  const corrected = fixMissingFieldCommas(body);
+  const parsed = parseFields(corrected);
+  const fields = {};
+  const defLabel = titleCase(key.replace(/_/g, ' '));
+
+  const labelVal = parsed.label ? unquote(parsed.label.trim()) : '';
+  const typeVal = parsed.type ? unquote(parsed.type.trim()) : '';
+  const imgVal = parsed.image ? unquote(parsed.image.trim()) : '';
+  const descVal = parsed.description ? unquote(parsed.description.trim()) : '';
+
+  const fixedLabel = labelVal.trim() ? titleCase(labelVal) : defLabel;
+  fields.name = luaQ(key);
+  fields.label = luaQ(fixedLabel);
+  const w = Number(parsed.weight);
+  fields.weight = (parsed.weight === undefined || isNaN(w) || w < 0) ? '100' : parsed.weight.trim();
+  fields.type = typeVal ? toSingleQuoted(parsed.type.trim()) : luaQ('item');
+  fields.image = (imgVal && /\.(png|jpg|jpeg)$/i.test(imgVal) && imgVal.replace(/\.(png|jpg|jpeg)$/i, '') === key)
+    ? parsed.image.trim() : luaQ(key + '.png');
+  fields.unique = parsed.unique !== undefined && parsed.unique.trim() === 'true' ? 'true' : 'false';
+  fields.useable = parsed.useable !== undefined && parsed.useable.trim() === 'false' ? 'false' : 'true';
+  fields.shouldClose = parsed.shouldClose !== undefined && parsed.shouldClose.trim() === 'false' ? 'false' : 'true';
+  fields.description = (parsed.description === undefined || !descVal.trim() || descVal.length < 8)
+    ? luaQ(fixedLabel + ' — useful item to have around.') : toSingleQuoted(parsed.description.trim());
+
+  Object.keys(parsed).forEach(f => {
+    if (!REQUIRED_FIELDS.includes(f) && f !== 'combinable') fields[f] = toSingleQuoted(parsed[f].trim());
+  });
+  return fields;
+}
+
+// Renders a corrected item body as `{ name = '...', label = '...', ... }`,
+// matching the export format (FIELD_ORDER first, then extra fields).
+function renderFixedBody(key, fields) {
+  const order = [...FIELD_ORDER];
+  Object.keys(fields).forEach(f => { if (!order.includes(f)) order.push(f); });
+  const parts = order.filter(f => fields[f] !== undefined).map(f => `${f} = ${fields[f]},`);
+  if (parts.length) parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1);
+  return `{ ${parts.join(' ')} }`;
+}
+
+// Replaces the first item block matching `key` with its fixed version.
+// Only the `{ ... }` body is replaced, so the original key style
+// (["key"] = or key =) and surrounding whitespace are preserved. A trailing
+// comma is added when the next item follows without one.
+function fixItemInSource(src, key) {
+  const blocks = extractItemBlocks(src);
+  const block = blocks.find(b => b.key === key);
+  if (!block) return src;
+  const fields = getFixedFields(block.key, block.body);
+  const fixedBody = renderFixedBody(block.key, fields);
+  const next = blocks.find(b => b.start > block.end);
+  const needComma = next && !src.slice(block.end, next.start).replace(/--[^\n]*/g, '').trim().startsWith(',');
+  return src.slice(0, block.start) + fixedBody + (needComma ? ',' : '') + src.slice(block.end);
+}
+
 function render(blocks, missingCommas = []) {
   const results = document.getElementById('results');
   if (blocks.length === 0) {
@@ -392,7 +557,7 @@ function render(blocks, missingCommas = []) {
     <div class="item" style="border-color:var(--err);">
       <div class="item-head"><span class="item-name" style="color:var(--err);">Missing comma${missingCommas.length > 1 ? 's' : ''}</span></div>
       <div class="item-body open">
-        ${missingCommas.map(mc => `<div class="issue"><span class="tag error">error</span>No comma after <code>${mc.afterKey}</code>, before <code>${mc.beforeKey}</code> — this will break the Lua table.</div>`).join('')}
+        ${missingCommas.map(mc => `<div class="issue"><span class="tag error">error</span>No comma after <code>${escapeHtml(mc.afterKey)}</code>, before <code>${escapeHtml(mc.beforeKey)}</code> — this will break the Lua table.</div>`).join('')}
       </div>
     </div>` : '';
 
@@ -403,10 +568,14 @@ function render(blocks, missingCommas = []) {
     const warnCount = issues.filter(i => i.level === 'suggestion').length;
     if (errCount) totalErr++; else if (warnCount) totalWarn++; else totalOk++;
 
+    const safeKey = escapeHtml(key);
     const badges = [];
     if (errCount) badges.push(`<span class="badge err">${errCount} error${errCount>1?'s':''}</span>`);
     if (warnCount) badges.push(`<span class="badge warn">${warnCount} suggestion${warnCount>1?'s':''}</span>`);
     if (!errCount && !warnCount) badges.push(`<span class="badge ok">clean</span>`);
+    if (issues.length || missingCommas.some(mc => mc.afterKey === key)) {
+      badges.push(`<button class="fix-btn" data-fix-key="${safeKey}">Fix</button>`);
+    }
 
     const issuesHtml = issues.length
       ? issues.map(i => `<div class="issue"><span class="tag ${i.level === 'error' ? 'error' : 'suggestion'}">${i.level === 'error' ? 'error' : 'tip'}</span>${i.text}</div>`).join('')
@@ -414,8 +583,8 @@ function render(blocks, missingCommas = []) {
 
     return `
       <div class="item">
-        <div class="item-head" onclick="this.nextElementSibling.classList.toggle('open')">
-          <span class="item-name">${key}</span>
+        <div class="item-head" data-toggle>
+          <span class="item-name">${safeKey}</span>
           <span class="badges">${badges.join('')}</span>
         </div>
         <div class="item-body">${issuesHtml}</div>
@@ -429,16 +598,57 @@ function render(blocks, missingCommas = []) {
       <div class="stat err"><div class="n">${totalErr + missingCommas.length}</div><div class="l">Errors</div></div>
       <div class="stat"><div class="n">${blocks.length}</div><div class="l">Total items</div></div>
     </div>
+    <div class="row" style="margin-bottom:10px;">
+      <button class="secondary" data-fix-all>Fix All Items</button>
+    </div>
     ${missingCommaHtml}
     ${itemsHtml}
   `;
 }
 
-document.getElementById('checkBtn').addEventListener('click', () => {
-  const src = document.getElementById('input').value;
+function rerunCheck(src) {
   const blocks = extractItemBlocks(src);
   const missingCommas = findMissingCommas(src, blocks);
   render(blocks, missingCommas);
+}
+
+function fixItem(key) {
+  const input = document.getElementById('input');
+  const fixed = fixItemInSource(input.value, key);
+  if (fixed === input.value) return;
+  input.value = fixed;
+  rerunCheck(fixed);
+}
+
+function fixAll() {
+  const input = document.getElementById('input');
+  let src = input.value;
+  const keys = extractItemBlocks(src).map(b => b.key);
+  let changed = false;
+  keys.forEach(key => {
+    const updated = fixItemInSource(src, key);
+    if (updated !== src) { src = updated; changed = true; }
+  });
+  if (changed) {
+    input.value = src;
+    rerunCheck(src);
+  }
+}
+
+document.getElementById('checkBtn').addEventListener('click', () => {
+  rerunCheck(document.getElementById('input').value);
+});
+
+// Delegated clicks: Fix All / Fix item buttons, then the expandable headers.
+document.getElementById('results').addEventListener('click', (e) => {
+  if (e.target.closest('[data-fix-all]')) { e.preventDefault(); fixAll(); return; }
+  const fixBtn = e.target.closest('[data-fix-key]');
+  if (fixBtn) { e.preventDefault(); fixItem(fixBtn.dataset.fixKey); return; }
+  const head = e.target.closest('[data-toggle]');
+  if (head) {
+    const body = head.nextElementSibling;
+    if (body) body.classList.toggle('open');
+  }
 });
 
 document.getElementById('exportBtn').addEventListener('click', () => {
