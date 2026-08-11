@@ -1,8 +1,8 @@
 # RSG Item Tool
 
-✨ Store  :  https://store.rexshack.dev/
-✨ Tip Jar : https://buymeacoffee.com/rexshack
-✨ Discord : https://discord.gg/Dmeh4dTQBT
+- ✨ Store  :  https://store.rexshack.dev/
+- ✨ Tip Jar : https://buymeacoffee.com/rexshack
+- ✨ Discord : https://discord.gg/Dmeh4dTQBT
 
 A single-file HTML tool (`rex_item_tool.html`) for validating and cleaning up RSG-Core `shared/items.lua` item tables. Open the file in a browser — no server or build step required.
 
