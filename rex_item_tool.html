@@ -330,25 +330,37 @@ function buildCleanLua(blocks) {
     return true;
   });
 
-  const byKey = (a, b) => a.key.localeCompare(b.key);
+  // Natural alpha-numeric compare, so e.g. "item2" sorts before "item10".
+  const byKeyNatural = (a, b) => a.key.localeCompare(b.key, undefined, { numeric: true, sensitivity: 'base' });
 
-  const weapons = deduped.filter(e => e.key.startsWith('weapon_')).sort(byKey);
-  const ammo = deduped.filter(e => !weapons.includes(e) && e.key.startsWith('ammo_')).sort(byKey);
-  const perishables = deduped.filter(e => !weapons.includes(e) && !ammo.includes(e) && hasDecay(e.fields)).sort(byKey);
-  const standard = deduped.filter(e => !weapons.includes(e) && !ammo.includes(e) && !perishables.includes(e)).sort(byKey);
+  // Group by the item's declared `type` field (case-insensitive, e.g.
+  // 'weapon', 'weapon_thrown', 'AMMO_REVOLVER', 'item'), falling back to
+  // 'item' when type is missing/unparseable. Perishables (anything with an
+  // active `decay` field) get their own category regardless of type.
+  const categoryOf = (e) => {
+    if (e.fields.category !== undefined) {
+      const raw = unquote(e.fields.category.trim()).toLowerCase();
+      if (raw) return raw;
+    }
+    if (hasDecay(e.fields)) return 'perishable';
+    const raw = e.fields.type !== undefined ? unquote(e.fields.type.trim()).toLowerCase() : 'item';
+    return raw || 'item';
+  };
 
-  const sections = [];
-  const standardLines = renderGroup(standard);
-  if (standardLines.length) sections.push(standardLines.join('\n'));
+  const groups = new Map();
+  deduped.forEach(e => {
+    const cat = categoryOf(e);
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(e);
+  });
 
-  const weaponLines = renderGroup(weapons);
-  if (weaponLines.length) sections.push(`    -- weapons\n${weaponLines.join('\n')}`);
+  const sortedCategories = [...groups.keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
-  const ammoLines = renderGroup(ammo);
-  if (ammoLines.length) sections.push(`    -- ammo\n${ammoLines.join('\n')}`);
-
-  const perishableLines = renderGroup(perishables);
-  if (perishableLines.length) sections.push(`    -- perishables\n${perishableLines.join('\n')}`);
+  const sections = sortedCategories.map(cat => {
+    const items = groups.get(cat).sort(byKeyNatural);
+    const lines = renderGroup(items);
+    return `    -- ${cat}\n${lines.join('\n')}`;
+  });
 
   return `RSGShared = RSGShared or {}\nRSGShared.Items = {\n${sections.join('\n\n')}\n}\n`;
 }
