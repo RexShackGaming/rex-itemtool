@@ -36,6 +36,7 @@ Paste (or upload) your items table, hit **Check Items**, and the tool breaks dow
 - **`unique` / `useable` / `shouldClose`** → `false` / `true` / `true` unless a valid boolean is present.
 - **`description`** → filled with label-based text (e.g. `'Bandage — useful item to have around.'`) when empty or very short.
 - **`combinable`** → removed (deprecated in current RSG-Core).
+- **`category`** → set to `'general'` if missing; existing values are kept.
 - Extra fields (e.g. `decay`, `blends`) are preserved.
 - Missing commas — both between fields (`label = 'Water'  weight = 100`) and between items — are inserted.
 - Invalid Lua escape sequences inside quoted strings (e.g. `\S`) are repaired.
@@ -59,6 +60,7 @@ Paste (or upload) your items table, hit **Check Items**, and the tool breaks dow
 - `image` filename not matching the item key
 - Short or empty `description`
 - Deprecated `combinable` field
+- Missing `category` field
 
 Custom `type` values (e.g. `stew`, `painkillers`) and zero-weight items are **not** flagged — these are common and often intentional on RSG servers.
 
@@ -71,7 +73,8 @@ Custom `type` values (e.g. `stew`, `painkillers`) and zero-weight items are **no
 - Invalid escape sequences (e.g. `\S`) repaired during conversion
 - Bare, unbracketed item keys (e.g. `bread = { ... }`)
 - Duplicate keys removed (first occurrence kept)
-- Items sorted alphabetically and grouped under `-- weapons`, `-- ammo`, and `-- perishables` (items with a `decay` value)
+- Items with no `category` field are automatically given `category = 'general'` before export
+- Items sorted alphabetically and grouped by `category` (e.g. `-- tools`, `-- medical`, `-- general`)
 - Output wrapped as:
 
 ```lua

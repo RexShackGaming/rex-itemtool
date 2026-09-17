@@ -218,7 +218,7 @@ function parseFields(body) {
   return fields;
 }
 
-const FIELD_ORDER = ['name','label','weight','type','image','unique','useable','shouldClose','description'];
+const FIELD_ORDER = ['name','label','weight','type','image','unique','useable','shouldClose','description','category'];
 
 // Decodes the escape sequences in a Lua string body back into real characters
 // (so quote-style conversion can't corrupt backslashes or apostrophes).
@@ -319,6 +319,11 @@ function buildCleanLua(blocks) {
   const entries = blocks.map(({ key, body }) => {
     const fields = parseFields(body);
     Object.keys(fields).forEach(f => { fields[f] = toSingleQuoted(fields[f]); });
+    // Items with no `category` field get one added automatically so every
+    // exported item is explicitly categorized.
+    if (fields.category === undefined || !unquote(fields.category.trim())) {
+      fields.category = luaQ('general');
+    }
     return { key, fields };
   });
 
@@ -460,6 +465,10 @@ function analyzeItem(key, body) {
     }
   }
 
+  if (getField(body, 'category') === undefined) {
+    issues.push({level:'suggestion', text:'`category` is missing — Fix will set it to `\'general\'` (export also defaults missing categories to `\'general\'`).'});
+  }
+
   if (/\bcombinable\s*=/.test(body)) {
     issues.push({level:'suggestion', text:'`combinable` is deprecated in current RSG-Core and no longer used — safe to remove.'});
   }
@@ -527,8 +536,11 @@ function getFixedFields(key, body) {
   fields.description = (parsed.description === undefined || !descVal.trim() || descVal.length < 8)
     ? luaQ(fixedLabel + ' — useful item to have around.') : toSingleQuoted(parsed.description.trim());
 
+  const catVal = parsed.category ? unquote(parsed.category.trim()) : '';
+  fields.category = catVal.trim() ? toSingleQuoted(parsed.category.trim()) : luaQ('general');
+
   Object.keys(parsed).forEach(f => {
-    if (!REQUIRED_FIELDS.includes(f) && f !== 'combinable') fields[f] = toSingleQuoted(parsed[f].trim());
+    if (!REQUIRED_FIELDS.includes(f) && f !== 'combinable' && f !== 'category') fields[f] = toSingleQuoted(parsed[f].trim());
   });
   return fields;
 }
