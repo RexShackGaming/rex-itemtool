@@ -38,6 +38,10 @@
   .stat .n{font-size:20px;font-weight:700;}
   .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
   .stat.err .n{color:var(--err);} .stat.warn .n{color:var(--warn);} .stat.ok .n{color:var(--ok);}
+  .stat.filterable{cursor:pointer;user-select:none;transition:border-color .12s,background .12s;}
+  .stat.filterable:hover{border-color:var(--accent);}
+  .stat.filterable.active{border-color:var(--accent);background:var(--panel2);box-shadow:inset 0 0 0 1px var(--accent);}
+  .filter-hint{color:var(--muted);font-size:11px;margin:-2px 0 4px;}
   .item{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;}
   .item-head{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;}
   .item-head:hover{background:var(--panel2);}
@@ -100,6 +104,9 @@
 
 <script>
 const REQUIRED_FIELDS = ['name','label','weight','type','image','unique','useable','shouldClose','description'];
+
+// Which issue-category filters are currently active (OR'd together). Empty = show everything.
+const activeFilters = new Set();
 
 function extractItemBlocks(src) {
   const blocks = [];
@@ -601,14 +608,30 @@ function render(blocks, missingCommas = []) {
   const dupCounts = findDuplicateKeys(blocks);
   let totalErr = 0, totalWarn = 0, totalOk = 0, totalDupes = 0;
   const seenDupKeys = new Set();
-  const itemsHtml = blocks.map(({key, body}) => {
+  const itemEntries = blocks.map(({key, body}) => {
     const dupCount = dupCounts.get(key) || 1;
-    if (dupCount > 1 && !seenDupKeys.has(key)) { seenDupKeys.add(key); totalDupes++; }
+    const isDupe = dupCount > 1;
+    if (isDupe && !seenDupKeys.has(key)) { seenDupKeys.add(key); totalDupes++; }
     const issues = analyzeItem(key, body, dupCount);
     const errCount = issues.filter(i => i.level === 'error').length;
     const warnCount = issues.filter(i => i.level === 'suggestion').length;
     if (errCount) totalErr++; else if (warnCount) totalWarn++; else totalOk++;
+    return { key, body, issues, errCount, warnCount, isDupe };
+  });
 
+  // A filter set of {errors, suggestions, duplicates} controls which items are
+  // shown below; empty set (the default) shows every item. Filters are OR'd.
+  const matchesActiveFilters = (entry) => {
+    if (activeFilters.size === 0) return true;
+    if (activeFilters.has('errors') && entry.errCount > 0) return true;
+    if (activeFilters.has('suggestions') && entry.warnCount > 0) return true;
+    if (activeFilters.has('duplicates') && entry.isDupe) return true;
+    return false;
+  };
+
+  const visibleEntries = itemEntries.filter(matchesActiveFilters);
+
+  const itemsHtml = visibleEntries.map(({key, body, issues, errCount, warnCount}) => {
     const safeKey = escapeHtml(key);
     const badges = [];
     if (errCount) badges.push(`<span class="badge err">${errCount} error${errCount>1?'s':''}</span>`);
@@ -632,19 +655,25 @@ function render(blocks, missingCommas = []) {
       </div>`;
   }).join('');
 
+  const filterActive = (name) => activeFilters.has(name) ? ' active' : '';
+  const noMatches = visibleEntries.length === 0 && activeFilters.size > 0;
+  const showMissingComma = missingCommas.length > 0 && (activeFilters.size === 0 || activeFilters.has('errors'));
+
   results.innerHTML = `
     <div class="summary">
       <div class="stat ok"><div class="n">${totalOk}</div><div class="l">Clean</div></div>
-      <div class="stat warn"><div class="n">${totalWarn}</div><div class="l">Suggestions</div></div>
-      <div class="stat err"><div class="n">${totalErr + missingCommas.length}</div><div class="l">Errors</div></div>
-      ${totalDupes ? `<div class="stat err"><div class="n">${totalDupes}</div><div class="l">Duplicate keys</div></div>` : ''}
+      <div class="stat warn filterable${filterActive('suggestions')}" data-filter="suggestions"><div class="n">${totalWarn}</div><div class="l">Suggestions</div></div>
+      <div class="stat err filterable${filterActive('errors')}" data-filter="errors"><div class="n">${totalErr + missingCommas.length}</div><div class="l">Errors</div></div>
+      <div class="stat err filterable${filterActive('duplicates')}" data-filter="duplicates"><div class="n">${totalDupes}</div><div class="l">Duplicate keys</div></div>
       <div class="stat"><div class="n">${blocks.length}</div><div class="l">Total items</div></div>
     </div>
+    <div class="filter-hint">Click Suggestions, Errors or Duplicate keys above to filter the list below${activeFilters.size ? ' — click again to clear' : ''}.</div>
     <div class="row" style="margin-bottom:10px;">
       <button class="secondary" data-fix-all>Fix All Items</button>
+      ${activeFilters.size ? '<button class="secondary" data-clear-filters>Clear Filters</button>' : ''}
     </div>
-    ${missingCommaHtml}
-    ${itemsHtml}
+    ${showMissingComma ? missingCommaHtml : ''}
+    ${noMatches ? `<div class="empty">No items match the active filter${activeFilters.size > 1 ? 's' : ''}.</div>` : itemsHtml}
   `;
 }
 
@@ -684,6 +713,15 @@ document.getElementById('checkBtn').addEventListener('click', () => {
 // Delegated clicks: Fix All / Fix item buttons, then the expandable headers.
 document.getElementById('results').addEventListener('click', (e) => {
   if (e.target.closest('[data-fix-all]')) { e.preventDefault(); fixAll(); return; }
+  if (e.target.closest('[data-clear-filters]')) { e.preventDefault(); activeFilters.clear(); rerunCheck(document.getElementById('input').value); return; }
+  const filterStat = e.target.closest('[data-filter]');
+  if (filterStat) {
+    e.preventDefault();
+    const f = filterStat.dataset.filter;
+    if (activeFilters.has(f)) activeFilters.delete(f); else activeFilters.add(f);
+    rerunCheck(document.getElementById('input').value);
+    return;
+  }
   const fixBtn = e.target.closest('[data-fix-key]');
   if (fixBtn) { e.preventDefault(); fixItem(fixBtn.dataset.fixKey); return; }
   const head = e.target.closest('[data-toggle]');
@@ -720,6 +758,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
 
 document.getElementById('clearBtn').addEventListener('click', () => {
   document.getElementById('input').value = '';
+  activeFilters.clear();
   document.getElementById('results').innerHTML = '<div class="empty">Paste your items table on the left and click "Check Items".</div>';
 });
 

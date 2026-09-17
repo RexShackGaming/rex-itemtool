@@ -24,6 +24,8 @@ Paste (or upload) your items table, hit **Check Items**, and the tool breaks dow
 | **Load Sample** | Fills the editor with an example table so you can try the tool. |
 | **Clear** | Wipes the editor and the results panel. |
 
+The **Clean**, **Suggestions**, **Errors**, and **Duplicate keys** stat tiles above the results are also filters — click one (or several) to narrow the list to just those items, click again to unclick, or use **Clear Filters** to reset. Handy for working through a big table's errors first without scrolling past everything that's already clean.
+
 ---
 
 ## What Fix does to an item
@@ -107,6 +109,8 @@ If missing commas are detected, Export asks for confirmation first — the resul
 ---
 
 ## Recent fixes
+
+- **Filter the results by Suggestions, Errors, or Duplicate keys** — click the corresponding stat tile above the results to show only matching items (tiles can be combined, and click again to clear). A **Clear Filters** button appears whenever a filter is active.
 
 - **Duplicate item keys are now flagged by Check** — items sharing the same key (e.g. two `["bandage"] = { ... }` entries) previously went unmentioned by Check even though Export silently dropped all but the first. Each duplicate now shows as an error on every occurrence, and the summary bar shows a Duplicate keys count.
 
