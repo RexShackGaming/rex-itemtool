@@ -394,8 +394,21 @@ function findInvalidEscapes(body) {
   return invalid;
 }
 
-function analyzeItem(key, body) {
+// Returns a Map of key -> occurrence count across all item blocks, so
+// duplicate item keys (which silently shadow each other at load time,
+// since a Lua table can only hold one value per key) can be flagged.
+function findDuplicateKeys(blocks) {
+  const counts = new Map();
+  blocks.forEach(({ key }) => counts.set(key, (counts.get(key) || 0) + 1));
+  return counts;
+}
+
+function analyzeItem(key, body, dupCount = 1) {
   const issues = [];
+
+  if (dupCount > 1) {
+    issues.push({level:'error', text:`Duplicate item key \`${escapeHtml(key)}\` — appears ${dupCount} times. Only one entry will actually be kept when the table loads (later ones win); Export removes the extras, keeping the first occurrence.`});
+  }
 
   findInvalidEscapes(body).forEach(esc => {
     issues.push({level:'error', text:`Invalid Lua escape sequence \`${escapeHtml(esc)}\` inside a quoted string — this will fail to load. Fix will repair it.`});
@@ -585,9 +598,13 @@ function render(blocks, missingCommas = []) {
       </div>
     </div>` : '';
 
-  let totalErr = 0, totalWarn = 0, totalOk = 0;
+  const dupCounts = findDuplicateKeys(blocks);
+  let totalErr = 0, totalWarn = 0, totalOk = 0, totalDupes = 0;
+  const seenDupKeys = new Set();
   const itemsHtml = blocks.map(({key, body}) => {
-    const issues = analyzeItem(key, body);
+    const dupCount = dupCounts.get(key) || 1;
+    if (dupCount > 1 && !seenDupKeys.has(key)) { seenDupKeys.add(key); totalDupes++; }
+    const issues = analyzeItem(key, body, dupCount);
     const errCount = issues.filter(i => i.level === 'error').length;
     const warnCount = issues.filter(i => i.level === 'suggestion').length;
     if (errCount) totalErr++; else if (warnCount) totalWarn++; else totalOk++;
@@ -620,6 +637,7 @@ function render(blocks, missingCommas = []) {
       <div class="stat ok"><div class="n">${totalOk}</div><div class="l">Clean</div></div>
       <div class="stat warn"><div class="n">${totalWarn}</div><div class="l">Suggestions</div></div>
       <div class="stat err"><div class="n">${totalErr + missingCommas.length}</div><div class="l">Errors</div></div>
+      ${totalDupes ? `<div class="stat err"><div class="n">${totalDupes}</div><div class="l">Duplicate keys</div></div>` : ''}
       <div class="stat"><div class="n">${blocks.length}</div><div class="l">Total items</div></div>
     </div>
     <div class="row" style="margin-bottom:10px;">

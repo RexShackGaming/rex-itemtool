@@ -53,6 +53,7 @@ Paste (or upload) your items table, hit **Check Items**, and the tool breaks dow
 - `unique` / `useable` / `shouldClose` not `true` or `false`
 - Missing commas between items or between fields within an item
 - Invalid Lua escape sequences inside quoted strings (e.g. `\S`)
+- **Duplicate item keys** (the same key used for more than one entry — only one will actually load, the rest are silently shadowed)
 
 **Suggestions** (safe to ignore, auto-fixed where possible):
 - Lowercase or empty `label`
@@ -106,6 +107,8 @@ If missing commas are detected, Export asks for confirmation first — the resul
 ---
 
 ## Recent fixes
+
+- **Duplicate item keys are now flagged by Check** — items sharing the same key (e.g. two `["bandage"] = { ... }` entries) previously went unmentioned by Check even though Export silently dropped all but the first. Each duplicate now shows as an error on every occurrence, and the summary bar shows a Duplicate keys count.
 
 - **Nested field tables no longer misread as items** — extra fields written as their own table (e.g. `blends = { ... }`) were previously picked up as bogus top-level item entries, throwing off Check counts, missing-comma detection, and Export. The scanner now skips past each item's full body before looking for the next one.
 - **Safer rendering of untrusted item data** — item values (name, image, label, etc.) are now HTML-escaped before being shown in the results panel, so pasting or uploading a crafted/untrusted `items.lua` can't inject markup into the page.
