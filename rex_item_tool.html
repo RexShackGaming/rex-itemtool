@@ -53,6 +53,11 @@
   .badge.ok{background:rgba(95,184,122,.15);color:var(--ok);}
   .fix-btn{background:var(--ok);color:#1a1a1a;border:none;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;}
   .fix-btn:hover{filter:brightness(1.1);}
+  .cat-edit{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--border);margin-bottom:6px;flex-wrap:wrap;}
+  .cat-edit label{font-size:12px;color:var(--muted);}
+  .cat-edit select.cat-select{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;}
+  .cat-new-input{display:none;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;}
+  .cat-apply-btn{padding:5px 10px;font-size:11px;}
   .item-body{padding:0 14px 12px;display:none;border-top:1px solid var(--border);}
   .item-body.open{display:block;}
   .issue{padding:8px 0;font-size:13px;border-bottom:1px dashed var(--border);}
@@ -597,6 +602,38 @@ function fixItemInSource(src, key) {
   return src.slice(0, block.start) + fixedBody + (needComma ? ',' : '') + src.slice(block.end);
 }
 
+// Sets (or inserts) an item's `category` field to newCategory, leaving every
+// other field untouched. Used by the per-item category editor.
+function setCategoryInSource(src, key, newCategory) {
+  const blocks = extractItemBlocks(src);
+  const block = blocks.find(b => b.key === key);
+  if (!block) return src;
+  const body = block.body;
+  const catQuoted = luaQ(newCategory);
+  const catRegex = /\bcategory\s*=\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,}]+)/;
+  let newBody;
+  if (catRegex.test(body)) {
+    newBody = body.replace(catRegex, `category = ${catQuoted}`);
+  } else {
+    const close = body.lastIndexOf('}');
+    let before = body.slice(0, close).replace(/\s+$/, '');
+    const needsComma = !/[,{]$/.test(before.trim());
+    newBody = before + (needsComma ? ',' : '') + ` category = ${catQuoted} ` + body.slice(close);
+  }
+  return src.slice(0, block.start) + newBody + src.slice(block.end);
+}
+
+// Applies a new category to one item in the source editor and re-checks.
+function applyCategory(key, newCategory) {
+  const trimmed = (newCategory || '').trim();
+  if (!trimmed) return;
+  const input = document.getElementById('input');
+  const updated = setCategoryInSource(input.value, key, trimmed);
+  if (updated === input.value) return;
+  input.value = updated;
+  rerunCheck(updated);
+}
+
 function render(blocks, missingCommas = []) {
   const results = document.getElementById('results');
   if (blocks.length === 0) {
@@ -650,8 +687,21 @@ function render(blocks, missingCommas = []) {
 
   const visibleEntries = itemEntries.filter(matchesActiveFilters);
 
-  const itemsHtml = visibleEntries.map(({key, body, issues, errCount, warnCount}) => {
+  const itemsHtml = visibleEntries.map(({key, body, issues, errCount, warnCount, category}) => {
     const safeKey = escapeHtml(key);
+    const catOptionsHtml = categories.map(c =>
+      `<option value="${escapeHtml(c)}"${c === category ? ' selected' : ''}>${escapeHtml(c)}</option>`
+    ).join('');
+    const catEditorHtml = `
+      <div class="cat-edit">
+        <label>Category:</label>
+        <select class="cat-select" data-cat-key="${safeKey}">
+          ${catOptionsHtml}
+          <option value="__new__">+ New category&hellip;</option>
+        </select>
+        <input type="text" class="cat-new-input" data-cat-key="${safeKey}" placeholder="new category name">
+        <button class="secondary cat-apply-btn" data-cat-key="${safeKey}">Set</button>
+      </div>`;
     const badges = [];
     if (errCount) badges.push(`<span class="badge err">${errCount} error${errCount>1?'s':''}</span>`);
     if (warnCount) badges.push(`<span class="badge warn">${warnCount} suggestion${warnCount>1?'s':''}</span>`);
@@ -670,7 +720,7 @@ function render(blocks, missingCommas = []) {
           <span class="item-name">${safeKey}</span>
           <span class="badges">${badges.join('')}</span>
         </div>
-        <div class="item-body">${issuesHtml}</div>
+        <div class="item-body">${catEditorHtml}${issuesHtml}</div>
       </div>`;
   }).join('');
 
@@ -752,6 +802,14 @@ document.getElementById('results').addEventListener('click', (e) => {
   }
   const fixBtn = e.target.closest('[data-fix-key]');
   if (fixBtn) { e.preventDefault(); fixItem(fixBtn.dataset.fixKey); return; }
+  const catApplyBtn = e.target.closest('.cat-apply-btn');
+  if (catApplyBtn) {
+    e.preventDefault();
+    const key = catApplyBtn.dataset.catKey;
+    const newInput = catApplyBtn.parentElement.querySelector('.cat-new-input');
+    if (newInput) applyCategory(key, newInput.value);
+    return;
+  }
   const head = e.target.closest('[data-toggle]');
   if (head) {
     const body = head.nextElementSibling;
@@ -761,9 +819,31 @@ document.getElementById('results').addEventListener('click', (e) => {
 
 document.getElementById('results').addEventListener('change', (e) => {
   const select = e.target.closest('#categoryFilter');
-  if (!select) return;
-  activeCategory = select.value;
-  rerunCheck(document.getElementById('input').value);
+  if (select) {
+    activeCategory = select.value;
+    rerunCheck(document.getElementById('input').value);
+    return;
+  }
+  const catSelect = e.target.closest('.cat-select');
+  if (catSelect) {
+    const key = catSelect.dataset.catKey;
+    const newInput = catSelect.parentElement.querySelector('.cat-new-input');
+    if (catSelect.value === '__new__') {
+      if (newInput) { newInput.style.display = 'inline-block'; newInput.focus(); }
+      return;
+    }
+    if (newInput) newInput.style.display = 'none';
+    applyCategory(key, catSelect.value);
+  }
+});
+
+// Enter key in the "new category" text box applies it, same as clicking Set.
+document.getElementById('results').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const newInput = e.target.closest('.cat-new-input');
+  if (!newInput) return;
+  e.preventDefault();
+  applyCategory(newInput.dataset.catKey, newInput.value);
 });
 
 document.getElementById('exportBtn').addEventListener('click', () => {

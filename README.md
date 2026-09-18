@@ -28,6 +28,8 @@ The **Clean**, **Suggestions**, **Errors**, and **Duplicate keys** stat tiles ab
 
 A **Category** dropdown next to **Fix All Items** lets you narrow the list to a single category (e.g. `tools`, `medical`, `general`) — it's populated automatically from whatever categories are present in your table (declared `category` field, falling back to `perishable` for items with an active `decay` field, then `type`, then `general`). It combines with the stat-tile filters, so you can e.g. show only the **errors** within the **medical** category. **Clear Filters** resets this back to "All Categories" too.
 
+Each item's expanded view also has a **Category** editor: a dropdown (pre-filled with every category already in your table) plus a "+ New category..." option that reveals a text box for typing a brand new one. Pick a category and it's applied to that item immediately — the editor sets (or adds) the item's `category` field in place in the source editor and re-checks, without touching any other field.
+
 ---
 
 ## What Fix does to an item
@@ -111,6 +113,8 @@ If missing commas are detected, Export asks for confirmation first — the resul
 ---
 
 ## Recent fixes
+
+- **Edit an item's category directly from the results** — expanding an item now shows a Category dropdown (existing categories, or "+ New category...") so you can recategorize it in one click without hand-editing the Lua.
 
 - **Filter items by category** — a new **Category** dropdown next to Fix All Items narrows the results list to a single category, on top of the existing Suggestions/Errors/Duplicate keys filters.
 
