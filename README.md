@@ -26,6 +26,8 @@ Paste (or upload) your items table, hit **Check Items**, and the tool breaks dow
 
 The **Clean**, **Suggestions**, **Errors**, and **Duplicate keys** stat tiles above the results are also filters — click one (or several) to narrow the list to just those items, click again to unclick, or use **Clear Filters** to reset. Handy for working through a big table's errors first without scrolling past everything that's already clean.
 
+A **Category** dropdown next to **Fix All Items** lets you narrow the list to a single category (e.g. `tools`, `medical`, `general`) — it's populated automatically from whatever categories are present in your table (declared `category` field, falling back to `perishable` for items with an active `decay` field, then `type`, then `general`). It combines with the stat-tile filters, so you can e.g. show only the **errors** within the **medical** category. **Clear Filters** resets this back to "All Categories" too.
+
 ---
 
 ## What Fix does to an item
@@ -109,6 +111,8 @@ If missing commas are detected, Export asks for confirmation first — the resul
 ---
 
 ## Recent fixes
+
+- **Filter items by category** — a new **Category** dropdown next to Fix All Items narrows the results list to a single category, on top of the existing Suggestions/Errors/Duplicate keys filters.
 
 - **Filter the results by Suggestions, Errors, or Duplicate keys** — click the corresponding stat tile above the results to show only matching items (tiles can be combined, and click again to clear). A **Clear Filters** button appears whenever a filter is active.
 

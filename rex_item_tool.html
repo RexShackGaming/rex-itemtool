@@ -108,6 +108,10 @@ const REQUIRED_FIELDS = ['name','label','weight','type','image','unique','useabl
 // Which issue-category filters are currently active (OR'd together). Empty = show everything.
 const activeFilters = new Set();
 
+// Which item category is currently selected in the category filter dropdown.
+// '' (the default) means show items from every category.
+let activeCategory = '';
+
 function extractItemBlocks(src) {
   const blocks = [];
   // matches ["itemname"] = { ... }  OR  itemname = { ... }  (bare key form)
@@ -281,6 +285,20 @@ function hasDecay(fields) {
   return v !== 'nil' && v !== 'false';
 }
 
+// Determines an item's category: the declared `category` field wins when
+// present and non-empty; otherwise perishables (anything with an active
+// `decay` field) get their own bucket, then it falls back to the item's
+// `type` field, and finally to 'item' if nothing usable is present.
+function categoryOf(fields) {
+  if (fields.category !== undefined) {
+    const raw = unquote(fields.category.trim()).toLowerCase();
+    if (raw) return raw;
+  }
+  if (hasDecay(fields)) return 'perishable';
+  const raw = fields.type !== undefined ? unquote(fields.type.trim()).toLowerCase() : 'item';
+  return raw || 'item';
+}
+
 // Renders one group of entries as aligned Lua table lines (own column
 // widths, so unrelated groups don't force each other's columns wider).
 function renderGroup(entries) {
@@ -345,23 +363,12 @@ function buildCleanLua(blocks) {
   // Natural alpha-numeric compare, so e.g. "item2" sorts before "item10".
   const byKeyNatural = (a, b) => a.key.localeCompare(b.key, undefined, { numeric: true, sensitivity: 'base' });
 
-  // Group by the item's declared `type` field (case-insensitive, e.g.
-  // 'weapon', 'weapon_thrown', 'AMMO_REVOLVER', 'item'), falling back to
-  // 'item' when type is missing/unparseable. Perishables (anything with an
-  // active `decay` field) get their own category regardless of type.
-  const categoryOf = (e) => {
-    if (e.fields.category !== undefined) {
-      const raw = unquote(e.fields.category.trim()).toLowerCase();
-      if (raw) return raw;
-    }
-    if (hasDecay(e.fields)) return 'perishable';
-    const raw = e.fields.type !== undefined ? unquote(e.fields.type.trim()).toLowerCase() : 'item';
-    return raw || 'item';
-  };
-
+  // Group by category (see categoryOf above): declared `category` field,
+  // else 'perishable' for anything with an active `decay` field, else the
+  // item's `type`, falling back to 'item'.
   const groups = new Map();
   deduped.forEach(e => {
-    const cat = categoryOf(e);
+    const cat = categoryOf(e.fields);
     if (!groups.has(cat)) groups.set(cat, []);
     groups.get(cat).push(e);
   });
@@ -616,12 +623,24 @@ function render(blocks, missingCommas = []) {
     const errCount = issues.filter(i => i.level === 'error').length;
     const warnCount = issues.filter(i => i.level === 'suggestion').length;
     if (errCount) totalErr++; else if (warnCount) totalWarn++; else totalOk++;
-    return { key, body, issues, errCount, warnCount, isDupe };
+    const category = categoryOf(parseFields(body));
+    return { key, body, issues, errCount, warnCount, isDupe, category };
   });
+
+  // Every distinct category present in the current items, alphabetically —
+  // used to populate the category filter dropdown.
+  const categories = [...new Set(itemEntries.map(e => e.category))].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+  // If the previously selected category no longer exists in this data
+  // (e.g. after editing the source), fall back to showing all categories.
+  if (activeCategory && !categories.includes(activeCategory)) activeCategory = '';
 
   // A filter set of {errors, suggestions, duplicates} controls which items are
   // shown below; empty set (the default) shows every item. Filters are OR'd.
+  // The category dropdown (activeCategory) is applied on top as an AND.
   const matchesActiveFilters = (entry) => {
+    if (activeCategory && entry.category !== activeCategory) return false;
     if (activeFilters.size === 0) return true;
     if (activeFilters.has('errors') && entry.errCount > 0) return true;
     if (activeFilters.has('suggestions') && entry.warnCount > 0) return true;
@@ -656,8 +675,13 @@ function render(blocks, missingCommas = []) {
   }).join('');
 
   const filterActive = (name) => activeFilters.has(name) ? ' active' : '';
-  const noMatches = visibleEntries.length === 0 && activeFilters.size > 0;
+  const anyFilterActive = activeFilters.size > 0 || !!activeCategory;
+  const noMatches = visibleEntries.length === 0 && anyFilterActive;
   const showMissingComma = missingCommas.length > 0 && (activeFilters.size === 0 || activeFilters.has('errors'));
+
+  const categoryOptionsHtml = categories.map(cat =>
+    `<option value="${escapeHtml(cat)}"${cat === activeCategory ? ' selected' : ''}>${escapeHtml(cat)}</option>`
+  ).join('');
 
   results.innerHTML = `
     <div class="summary">
@@ -667,13 +691,17 @@ function render(blocks, missingCommas = []) {
       <div class="stat err filterable${filterActive('duplicates')}" data-filter="duplicates"><div class="n">${totalDupes}</div><div class="l">Duplicate keys</div></div>
       <div class="stat"><div class="n">${blocks.length}</div><div class="l">Total items</div></div>
     </div>
-    <div class="filter-hint">Click Suggestions, Errors or Duplicate keys above to filter the list below${activeFilters.size ? ' — click again to clear' : ''}.</div>
+    <div class="filter-hint">Click Suggestions, Errors or Duplicate keys above, or pick a category below, to filter the list${anyFilterActive ? ' — click again / choose "All Categories" to clear' : ''}.</div>
     <div class="row" style="margin-bottom:10px;">
       <button class="secondary" data-fix-all>Fix All Items</button>
-      ${activeFilters.size ? '<button class="secondary" data-clear-filters>Clear Filters</button>' : ''}
+      <select id="categoryFilter" class="secondary" style="padding:9px 10px;border-radius:6px;">
+        <option value=""${activeCategory ? '' : ' selected'}>All Categories (${categories.length})</option>
+        ${categoryOptionsHtml}
+      </select>
+      ${anyFilterActive ? '<button class="secondary" data-clear-filters>Clear Filters</button>' : ''}
     </div>
     ${showMissingComma ? missingCommaHtml : ''}
-    ${noMatches ? `<div class="empty">No items match the active filter${activeFilters.size > 1 ? 's' : ''}.</div>` : itemsHtml}
+    ${noMatches ? `<div class="empty">No items match the active filter${activeFilters.size > 1 || (activeFilters.size && activeCategory) ? 's' : ''}.</div>` : itemsHtml}
   `;
 }
 
@@ -713,7 +741,7 @@ document.getElementById('checkBtn').addEventListener('click', () => {
 // Delegated clicks: Fix All / Fix item buttons, then the expandable headers.
 document.getElementById('results').addEventListener('click', (e) => {
   if (e.target.closest('[data-fix-all]')) { e.preventDefault(); fixAll(); return; }
-  if (e.target.closest('[data-clear-filters]')) { e.preventDefault(); activeFilters.clear(); rerunCheck(document.getElementById('input').value); return; }
+  if (e.target.closest('[data-clear-filters]')) { e.preventDefault(); activeFilters.clear(); activeCategory = ''; rerunCheck(document.getElementById('input').value); return; }
   const filterStat = e.target.closest('[data-filter]');
   if (filterStat) {
     e.preventDefault();
@@ -729,6 +757,13 @@ document.getElementById('results').addEventListener('click', (e) => {
     const body = head.nextElementSibling;
     if (body) body.classList.toggle('open');
   }
+});
+
+document.getElementById('results').addEventListener('change', (e) => {
+  const select = e.target.closest('#categoryFilter');
+  if (!select) return;
+  activeCategory = select.value;
+  rerunCheck(document.getElementById('input').value);
 });
 
 document.getElementById('exportBtn').addEventListener('click', () => {
@@ -759,6 +794,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
 document.getElementById('clearBtn').addEventListener('click', () => {
   document.getElementById('input').value = '';
   activeFilters.clear();
+  activeCategory = '';
   document.getElementById('results').innerHTML = '<div class="empty">Paste your items table on the left and click "Check Items".</div>';
 });
 
