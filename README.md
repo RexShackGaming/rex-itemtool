@@ -12,23 +12,33 @@ A single-file HTML tool for validating and cleaning up RSG-Core `shared/items.lu
 
 ## What it does
 
+Opening the tool shows a **start page** with two options:
+
+- **Option 1 — Create items.lua from images:** pick a folder of item images and an item is generated for each one.
+- **Option 2 — Check an existing items.lua:** upload your file and it's checked straight away for format errors, missing fields and duplicate keys.
+
+There's also a link to open the tool empty and paste items by hand. Use **← Start page** in the header to go back.
+
 Paste (or upload) your items table, hit **Check Items**, and the tool breaks down every item on the right side: clean items, suggestions, and errors. From there you can **Fix** issues one item at a time, **Fix All** in one click, or **Export** a clean, reformatted copy of the whole file.
 
 | Button | What happens |
 | --- | --- |
 | **Upload items.lua** | Loads a `.lua`/`.txt` file into the editor. |
+| **From Image Folder** | Pick a folder of `.png`/`.jpg`/`.jpeg` images and one item is created per image (key = filename, lowercased, spaces/symbols → `_`), with Fix defaults for every other field. The `image` field keeps the real filename and extension. Appends to the current table, skipping keys that already exist. |
 | **Check Items** | Validates every item and lists errors / suggestions per item, with summary stats up top. |
-| **Fix** *(per item)* | Repairs that one item's block in the editor, then re-checks it automatically so it re-renders clean. |
-| **Fix All Items** | Applies the same fixes to every item at once. |
+| **Fix** *(per item)* | Repairs that one item's block in the editor (and removes any later duplicates of its key), then re-checks it automatically so it re-renders clean. |
+| **Fix All Items** | Removes duplicate keys (first occurrence kept) and applies the same fixes to every item at once. |
 | **Export Clean items.lua** | Downloads a reformatted, deduplicated, grouped version of the table. |
 | **Load Sample** | Fills the editor with an example table so you can try the tool. |
 | **Clear** | Wipes the editor and the results panel. |
 
 The **Clean**, **Suggestions**, **Errors**, and **Duplicate keys** stat tiles above the results are also filters — click one (or several) to narrow the list to just those items, click again to unclick, or use **Clear Filters** to reset. Handy for working through a big table's errors first without scrolling past everything that's already clean.
 
-A **Category** dropdown next to **Fix All Items** lets you narrow the list to a single category (e.g. `tools`, `medical`, `general`) — it's populated automatically from whatever categories are present in your table (declared `category` field, falling back to `perishable` for items with an active `decay` field, then `type`, then `general`). It combines with the stat-tile filters, so you can e.g. show only the **errors** within the **medical** category. **Clear Filters** resets this back to "All Categories" too.
+A **Category** dropdown next to **Fix All Items** lets you narrow the list to a single category (e.g. `tools`, `medical`, `general`) — it's populated automatically from whatever categories are present in your table (declared `category` field, falling back to `perishable` for items with an active `decay` field, then `type`, then `item`). It combines with the stat-tile filters, so you can e.g. show only the **errors** within the **medical** category. **Clear Filters** resets this back to "All Categories" too.
 
-Each item's expanded view also has a **Category** editor: a dropdown (pre-filled with every category already in your table) plus a "+ New category..." option that reveals a text box for typing a brand new one. Pick a category and it's applied to that item immediately — the editor sets (or adds) the item's `category` field in place in the source editor and re-checks, without touching any other field.
+Below that, a **Set category for all items** bar changes the category of every item in one go. It applies to whatever the list is currently showing, so combine it with the filters to bulk-recategorize just a subset (e.g. pick `general` in the Category dropdown, then move all of those to `tools`). Choose an existing category or "+ New category...", click **Apply** (or press Enter in the new-category box), and confirm.
+
+Each item's expanded view also has a **Category** editor: a dropdown (pre-filled with every category already in your table) plus a "+ New category..." option that reveals a text box for typing a brand new one. Pick a category and click **Set** (or press Enter in the new-category box) — the editor sets (or adds) the item's `category` field in place in the source editor and re-checks, without touching any other field.
 
 ---
 
@@ -44,6 +54,7 @@ Each item's expanded view also has a **Category** editor: a dropdown (pre-filled
 - **`combinable`** → removed (deprecated in current RSG-Core).
 - **`category`** → set to `'general'` if missing; existing values are kept.
 - Extra fields (e.g. `decay`, `blends`) are preserved.
+- Duplicate keys are removed, keeping the first occurrence (same as Export).
 - Missing commas — both between fields (`label = 'Water'  weight = 100`) and between items — are inserted.
 - Invalid Lua escape sequences inside quoted strings (e.g. `\S`) are repaired.
 
@@ -107,12 +118,21 @@ If missing commas are detected, Export asks for confirmation first — the resul
 
 ## Notes
 
+- The version shown next to the title comes from `config.js` (`version: '1.0.0'`). Keep `config.js` in the same folder as `rex_item_tool.html`; edit it to bump the version.
 - Expects entries in the form `["itemname"] = { ... }`, `itemname = { ... }`, or `RSGCore.Shared.Items["itemname"] = { ... }`.
 - Designed for RSG-Core's item table format; adjust `REQUIRED_FIELDS` and `FIELD_ORDER` in the script if your fork uses different conventions.
 
 ---
 
 ## Recent fixes
+
+- **Start page** — the tool now opens on a page asking whether you want to create an items.lua from images or check an existing one; uploading a file now runs Check automatically.
+
+- **Create items from a folder of images** — **From Image Folder** builds a new item for every `.png`/`.jpg`/`.jpeg` in a chosen folder, filled with Fix defaults, and appends them to your table without overwriting existing keys.
+
+- **Fix now removes duplicate keys** — Fix and Fix All drop later duplicates of a key (keeping the first, matching Export), so the Duplicate keys error clears after fixing.
+
+- **Bulk category changes** — the **Set category for all items** bar recategorizes every item currently shown in the list, so it works with the stat-tile and Category filters.
 
 - **Edit an item's category directly from the results** — expanding an item now shows a Category dropdown (existing categories, or "+ New category...") so you can recategorize it in one click without hand-editing the Lua.
 

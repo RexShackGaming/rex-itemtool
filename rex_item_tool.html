@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>RSG Shared Items Checker</title>
+<title>RSG Shared Items Tool</title>
 <style>
   :root{
     --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#2a2f3a;
@@ -13,6 +13,8 @@
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
   header{padding:20px 28px;border-bottom:1px solid var(--border);}
   header h1{margin:0 0 4px;font-size:20px;}
+  header .version{font-size:12px;font-weight:normal;color:var(--muted);margin-left:8px;padding:2px 8px;border:1px solid var(--border);border-radius:10px;vertical-align:middle;}
+  header .byline{font-size:12px;font-weight:normal;color:var(--accent);margin-left:6px;vertical-align:middle;}
   header p{margin:0;color:var(--muted);font-size:13px;}
   .layout{display:grid;grid-template-columns:1fr 1fr;gap:0;height:calc(100vh - 78px);}
   .pane{overflow:auto;padding:18px 24px;}
@@ -68,19 +70,53 @@
   .empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center;}
   .hint{color:var(--muted);font-size:12px;margin-top:-4px;}
   code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px;}
+  /* ---- Start page ---- */
+  .landing{min-height:calc(100vh - 78px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px;gap:24px;}
+  .landing h2{margin:0;font-size:22px;}
+  .landing .sub{margin:0;color:var(--muted);font-size:14px;text-align:center;}
+  .choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;width:100%;max-width:760px;}
+  .choice{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:24px;text-align:left;color:var(--text);cursor:pointer;font:inherit;transition:border-color .15s,transform .15s;}
+  .choice:hover,.choice:focus-visible{border-color:var(--accent);transform:translateY(-2px);outline:none;}
+  .choice .num{color:var(--accent);font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;}
+  .choice h3{margin:8px 0;font-size:17px;}
+  .choice p{margin:0;color:var(--muted);font-size:13px;line-height:1.5;}
+  .skip{background:none;border:none;color:var(--muted);text-decoration:underline;cursor:pointer;font:inherit;font-size:13px;}
+  .home-btn{float:right;margin-top:-2px;}
+  .hidden{display:none !important;}
 </style>
+<script src="config.js"></script>
 </head>
 <body>
 
 <header>
-  <h1>RSG Shared Items Checker</h1>
+  <button class="secondary home-btn hidden" id="homeBtn" title="Back to the start page">&larr; Start page</button>
+  <h1>RSG Shared Items Tool <span class="version" id="appVersion">v?</span> <span class="byline">made by RexShack</span></h1>
   <p>Paste or upload your RSG-Core <code>shared/items.lua</code> to validate item format and surface improvements.</p>
 </header>
 
-<div class="layout">
+<section class="landing" id="landing">
+  <h2>What would you like to do?</h2>
+  <p class="sub">Pick an option to get started. You can switch between them at any time from the start page.</p>
+  <div class="choices">
+    <button class="choice" id="choiceImages">
+      <div class="num">Option 1</div>
+      <h3>Create items.lua from images</h3>
+      <p>Select a folder of <code>.png</code>/<code>.jpg</code> item images. One item is created per image, filled with sensible defaults, ready to edit and export.</p>
+    </button>
+    <button class="choice" id="choiceCheck">
+      <div class="num">Option 2</div>
+      <h3>Check an existing items.lua</h3>
+      <p>Upload your <code>items.lua</code> to check its format and find errors, missing fields and duplicate keys, then fix and export a clean copy.</p>
+    </button>
+  </div>
+  <button class="skip" id="skipBtn">Or open the tool and paste items manually</button>
+</section>
+
+<div class="layout hidden" id="tool">
   <div class="pane left">
     <div class="row">
       <label class="filebtn">Upload items.lua<input type="file" id="fileInput" accept=".lua,.txt"></label>
+      <label class="filebtn" title="Pick a folder of item images — one item is created per image, named after the file">From Image Folder<input type="file" id="folderInput" webkitdirectory directory multiple></label>
       <button id="checkBtn">Check Items</button>
       <button class="secondary" id="exportBtn">Export Clean items.lua</button>
       <button class="secondary" id="sampleBtn">Load Sample</button>
@@ -108,6 +144,25 @@
 </div>
 
 <script>
+function showTool() {
+  document.getElementById('landing').classList.add('hidden');
+  document.getElementById('tool').classList.remove('hidden');
+  document.getElementById('homeBtn').classList.remove('hidden');
+}
+function showLanding() {
+  document.getElementById('tool').classList.add('hidden');
+  document.getElementById('homeBtn').classList.add('hidden');
+  document.getElementById('landing').classList.remove('hidden');
+}
+document.getElementById('choiceImages').addEventListener('click', () => document.getElementById('folderInput').click());
+document.getElementById('choiceCheck').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('skipBtn').addEventListener('click', showTool);
+document.getElementById('homeBtn').addEventListener('click', showLanding);
+(function showVersion(){
+  const cfg = window.REX_ITEMTOOL_CONFIG;
+  const el = document.getElementById('appVersion');
+  if (el) el.textContent = cfg && cfg.version ? 'v' + cfg.version : 'version unknown';
+})();
 const REQUIRED_FIELDS = ['name','label','weight','type','image','unique','useable','shouldClose','description'];
 
 // Which issue-category filters are currently active (OR'd together). Empty = show everything.
@@ -116,6 +171,10 @@ const activeFilters = new Set();
 // Which item category is currently selected in the category filter dropdown.
 // '' (the default) means show items from every category.
 let activeCategory = '';
+
+// Keys of the items currently shown in the results list (after filters) —
+// the bulk category editor applies to exactly these.
+let lastVisibleKeys = [];
 
 function extractItemBlocks(src) {
   const blocks = [];
@@ -173,7 +232,7 @@ function findMissingCommas(src, blocks) {
 }
 
 function getField(body, field) {
-  const match = body.match(new RegExp('\\b' + field + '\\s*=\\s*(nil|true|false|"[^"]*"|\'[^\']*\'|[-0-9.]+)'));
+  const match = body.match(new RegExp('\\b' + field + '\\s*=\\s*(nil|true|false|"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'|[-0-9.]+)'));
   return match ? match[1] : undefined;
 }
 
@@ -489,7 +548,7 @@ function analyzeItem(key, body, dupCount = 1) {
   });
 
   if (present.description !== undefined) {
-    const d = present.description.replace(/["']/g,'');
+    const d = decodeLuaString(unquote(present.description.trim()));
     if (!d.trim()) {
       issues.push({level:'suggestion', text:'`description` is empty — add flavor/usage text shown in the inventory tooltip.'});
     } else if (d.length < 8) {
@@ -591,6 +650,33 @@ function renderFixedBody(key, fields) {
 // Only the `{ ... }` body is replaced, so the original key style
 // (["key"] = or key =) and surrounding whitespace are preserved. A trailing
 // comma is added when the next item follows without one.
+// Removes every occurrence of `key` after the first (matching what Export
+// keeps), along with the comma that followed each removed entry.
+function removeDuplicateKeys(src, onlyKey) {
+  const counts = findDuplicateKeys(extractItemBlocks(src));
+  const seen = new Set();
+  // Walk from the end so earlier offsets stay valid while slicing.
+  const toRemove = extractItemBlocks(src).filter(b => {
+    if (onlyKey && b.key !== onlyKey) return false;
+    if (counts.get(b.key) < 2) return false;
+    if (!seen.has(b.key)) { seen.add(b.key); return false; }
+    return true;
+  }).reverse();
+  toRemove.forEach(b => {
+    // Start at the beginning of the line holding the key, end after the trailing comma.
+    const lineStart = src.lastIndexOf('\n', b.start) + 1;
+    const keyPrefix = src.slice(lineStart, b.start);
+    const from = /^\s*(?:\[\s*["']?\w+["']?\s*\]|[A-Za-z_]\w*)\s*=\s*$/.test(keyPrefix)
+      ? lineStart
+      : src.lastIndexOf(b.key, b.start);
+    let to = b.end;
+    const m = src.slice(to).match(/^[ \t]*,?[ \t]*(?:--[^\n]*)?\n?/);
+    if (m) to += m[0].length;
+    src = src.slice(0, from) + src.slice(to);
+  });
+  return src;
+}
+
 function fixItemInSource(src, key) {
   const blocks = extractItemBlocks(src);
   const block = blocks.find(b => b.key === key);
@@ -632,6 +718,24 @@ function applyCategory(key, newCategory) {
   if (updated === input.value) return;
   input.value = updated;
   rerunCheck(updated);
+}
+
+// Applies one category to every item currently shown in the results list.
+function applyCategoryBulk() {
+  const select = document.getElementById('bulkCatSelect');
+  const newInput = document.getElementById('bulkCatInput');
+  const cat = (select.value === '__new__' ? newInput.value : select.value).trim();
+  if (!cat) { if (select.value === '__new__') newInput.focus(); return; }
+  if (!lastVisibleKeys.length) return;
+  if (!confirm(`Set category '${cat}' on ${lastVisibleKeys.length} item(s)?`)) return;
+  const input = document.getElementById('input');
+  let src = input.value;
+  lastVisibleKeys.forEach(key => { src = setCategoryInSource(src, key, cat); });
+  if (src === input.value) return;
+  input.value = src;
+  // The old category filter may no longer match anything; show the new one instead.
+  if (activeCategory) activeCategory = cat.toLowerCase();
+  rerunCheck(src);
 }
 
 function render(blocks, missingCommas = []) {
@@ -686,6 +790,7 @@ function render(blocks, missingCommas = []) {
   };
 
   const visibleEntries = itemEntries.filter(matchesActiveFilters);
+  lastVisibleKeys = [...new Set(visibleEntries.map(e => e.key))];
 
   const itemsHtml = visibleEntries.map(({key, body, issues, errCount, warnCount, category}) => {
     const safeKey = escapeHtml(key);
@@ -750,6 +855,15 @@ function render(blocks, missingCommas = []) {
       </select>
       ${anyFilterActive ? '<button class="secondary" data-clear-filters>Clear Filters</button>' : ''}
     </div>
+    <div class="cat-edit bulk-cat-edit" style="margin-bottom:10px;">
+      <label>Set category for ${anyFilterActive ? 'the ' + visibleEntries.length + ' shown' : 'all ' + visibleEntries.length} item${visibleEntries.length === 1 ? '' : 's'}:</label>
+      <select class="cat-select" id="bulkCatSelect">
+        ${categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+        <option value="__new__">+ New category&hellip;</option>
+      </select>
+      <input type="text" class="cat-new-input" id="bulkCatInput" placeholder="new category name">
+      <button class="secondary cat-apply-btn" data-bulk-cat>Apply to ${anyFilterActive ? 'shown' : 'all'}</button>
+    </div>
     ${showMissingComma ? missingCommaHtml : ''}
     ${noMatches ? `<div class="empty">No items match the active filter${activeFilters.size > 1 || (activeFilters.size && activeCategory) ? 's' : ''}.</div>` : itemsHtml}
   `;
@@ -763,7 +877,7 @@ function rerunCheck(src) {
 
 function fixItem(key) {
   const input = document.getElementById('input');
-  const fixed = fixItemInSource(input.value, key);
+  const fixed = fixItemInSource(removeDuplicateKeys(input.value, key), key);
   if (fixed === input.value) return;
   input.value = fixed;
   rerunCheck(fixed);
@@ -771,9 +885,9 @@ function fixItem(key) {
 
 function fixAll() {
   const input = document.getElementById('input');
-  let src = input.value;
+  let src = removeDuplicateKeys(input.value);
+  let changed = src !== input.value;
   const keys = extractItemBlocks(src).map(b => b.key);
-  let changed = false;
   keys.forEach(key => {
     const updated = fixItemInSource(src, key);
     if (updated !== src) { src = updated; changed = true; }
@@ -802,6 +916,7 @@ document.getElementById('results').addEventListener('click', (e) => {
   }
   const fixBtn = e.target.closest('[data-fix-key]');
   if (fixBtn) { e.preventDefault(); fixItem(fixBtn.dataset.fixKey); return; }
+  if (e.target.closest('[data-bulk-cat]')) { e.preventDefault(); applyCategoryBulk(); return; }
   const catApplyBtn = e.target.closest('.cat-apply-btn');
   if (catApplyBtn) {
     e.preventDefault();
@@ -824,6 +939,13 @@ document.getElementById('results').addEventListener('change', (e) => {
     rerunCheck(document.getElementById('input').value);
     return;
   }
+  const bulkSel = e.target.closest('#bulkCatSelect');
+  if (bulkSel) {
+    const inp = document.getElementById('bulkCatInput');
+    inp.style.display = bulkSel.value === '__new__' ? 'inline-block' : 'none';
+    if (bulkSel.value === '__new__') inp.focus();
+    return;
+  }
   const catSelect = e.target.closest('.cat-select');
   if (catSelect) {
     const key = catSelect.dataset.catKey;
@@ -840,6 +962,7 @@ document.getElementById('results').addEventListener('change', (e) => {
 // Enter key in the "new category" text box applies it, same as clicking Set.
 document.getElementById('results').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
+  if (e.target.id === 'bulkCatInput') { e.preventDefault(); applyCategoryBulk(); return; }
   const newInput = e.target.closest('.cat-new-input');
   if (!newInput) return;
   e.preventDefault();
@@ -882,8 +1005,69 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => { document.getElementById('input').value = reader.result; };
+  reader.onload = () => {
+    document.getElementById('input').value = reader.result;
+    e.target.value = '';
+    showTool();
+    rerunCheck(reader.result);
+  };
   reader.readAsText(file);
+});
+
+
+// ---- Create items from a folder of images ----
+// Each image filename (minus extension) becomes an item key; the rest of the
+// fields get the same defaults Fix uses. Keys already in the editor are skipped.
+const IMAGE_EXT_RE = /\.(png|jpg|jpeg)$/i;
+
+function keyFromFilename(filename) {
+  return filename.replace(IMAGE_EXT_RE, '').toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, '_$1');
+}
+
+function buildItemsFromImages(files, existingKeys) {
+  const created = [], skipped = [];
+  const seen = new Set(existingKeys);
+  files.filter(f => IMAGE_EXT_RE.test(f.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+    .forEach(f => {
+      const key = keyFromFilename(f.name);
+      if (!key || seen.has(key)) { skipped.push(f.name); return; }
+      seen.add(key);
+      const fields = getFixedFields(key, '{}');
+      fields.image = luaQ(f.name); // keep the real filename (and extension)
+      created.push({ key, fields });
+    });
+  return { created, skipped };
+}
+
+document.getElementById('folderInput').addEventListener('change', (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  const input = document.getElementById('input');
+  const src = input.value;
+  const existing = extractItemBlocks(src).map(b => b.key);
+  const { created, skipped } = buildItemsFromImages(files, existing);
+  if (!created.length) {
+    alert(`No new items to create — ${skipped.length ? skipped.length + ' image(s) already exist in the table' : 'no .png/.jpg images found in that folder'}.`);
+    return;
+  }
+  const lines = renderGroup(created);
+  let updated;
+  const close = src.lastIndexOf('}');
+  if (!src.trim() || existing.length === 0 || close === -1) {
+    updated = `RSGShared = RSGShared or {}\nRSGShared.Items = {\n    -- general\n${lines.join('\n')}\n}\n`;
+  } else {
+    // Append before the outer table's closing brace, adding a comma after the last existing item if needed.
+    let before = src.slice(0, close).replace(/\s+$/, '');
+    if (!/[,{]$/.test(before)) before += ',';
+    updated = `${before}\n\n    -- added from image folder\n${lines.join('\n')}\n${src.slice(close)}`;
+  }
+  input.value = updated;
+  showTool();
+  rerunCheck(updated);
+  if (skipped.length) alert(`Created ${created.length} item(s). Skipped ${skipped.length} image(s) whose key already exists.`);
 });
 
 document.getElementById('sampleBtn').addEventListener('click', () => {
