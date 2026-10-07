@@ -1,9 +1,5 @@
 # RSG Item Tool
 
-- ✨ Store   : https://store.rexshack.dev/
-- ✨ Tip Jar : https://buymeacoffee.com/rexshack
-- ✨ Discord : https://discord.gg/Dmeh4dTQBT
-
 A single-file HTML tool for validating and cleaning up RSG-Core `shared/items.lua` item tables. Open `rex_item_tool.html` in any browser — no server or build step required.
 
 <img width="1898" height="871" alt="rex_item_tool" src="https://github.com/user-attachments/assets/7ec484e1-32b6-4864-ae88-ec3c57c6ded0" />
@@ -124,23 +120,11 @@ If missing commas are detected, Export asks for confirmation first — the resul
 
 ---
 
-## Recent fixes
+## Support
 
-- **Start page** — the tool now opens on a page asking whether you want to create an items.lua from images or check an existing one; uploading a file now runs Check automatically.
+If you like this script, you can support development here:
 
-- **Create items from a folder of images** — **From Image Folder** builds a new item for every `.png`/`.jpg`/`.jpeg` in a chosen folder, filled with Fix defaults, and appends them to your table without overwriting existing keys.
-
-- **Fix now removes duplicate keys** — Fix and Fix All drop later duplicates of a key (keeping the first, matching Export), so the Duplicate keys error clears after fixing.
-
-- **Bulk category changes** — the **Set category for all items** bar recategorizes every item currently shown in the list, so it works with the stat-tile and Category filters.
-
-- **Edit an item's category directly from the results** — expanding an item now shows a Category dropdown (existing categories, or "+ New category...") so you can recategorize it in one click without hand-editing the Lua.
-
-- **Filter items by category** — a new **Category** dropdown next to Fix All Items narrows the results list to a single category, on top of the existing Suggestions/Errors/Duplicate keys filters.
-
-- **Filter the results by Suggestions, Errors, or Duplicate keys** — click the corresponding stat tile above the results to show only matching items (tiles can be combined, and click again to clear). A **Clear Filters** button appears whenever a filter is active.
-
-- **Duplicate item keys are now flagged by Check** — items sharing the same key (e.g. two `["bandage"] = { ... }` entries) previously went unmentioned by Check even though Export silently dropped all but the first. Each duplicate now shows as an error on every occurrence, and the summary bar shows a Duplicate keys count.
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/rexshack)
 
 - **Nested field tables no longer misread as items** — extra fields written as their own table (e.g. `blends = { ... }`) were previously picked up as bogus top-level item entries, throwing off Check counts, missing-comma detection, and Export. The scanner now skips past each item's full body before looking for the next one.
 - **Safer rendering of untrusted item data** — item values (name, image, label, etc.) are now HTML-escaped before being shown in the results panel, so pasting or uploading a crafted/untrusted `items.lua` can't inject markup into the page.
