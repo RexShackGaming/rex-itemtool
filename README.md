@@ -125,6 +125,3 @@ If missing commas are detected, Export asks for confirmation first — the resul
 If you like this script, you can support development here:
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/rexshack)
-
-- **Nested field tables no longer misread as items** — extra fields written as their own table (e.g. `blends = { ... }`) were previously picked up as bogus top-level item entries, throwing off Check counts, missing-comma detection, and Export. The scanner now skips past each item's full body before looking for the next one.
-- **Safer rendering of untrusted item data** — item values (name, image, label, etc.) are now HTML-escaped before being shown in the results panel, so pasting or uploading a crafted/untrusted `items.lua` can't inject markup into the page.
